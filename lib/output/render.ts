@@ -457,12 +457,12 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const newsy = a.category === "finance" || a.category === "politics";
   const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
   return `<article class="article">
-  <h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>
-  ${meta ? `<p class="article-stats">${meta}</p>` : ""}
-  ${metaLine ? `<p class="article-meta">${metaLine}</p>` : ""}
-  ${excerpt ? `<p class="article-excerpt">${excerpt}</p>` : ""}
-  ${summary ? `<p class="article-summary"><span class="summary-label">${summaryLabel}</span> ${summary}</p>` : ""}
-</article>`;
+	  <h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>
+	  ${meta ? `<p class="article-stats">${meta}</p>` : ""}
+	  ${metaLine ? `<p class="article-meta">${metaLine}</p>` : ""}
+	  ${REPORT_LOCALE === "en" && excerpt ? `<p class="article-excerpt">${excerpt}</p>` : ""}
+	  ${summary ? `<p class="article-summary"><span class="summary-label">${summaryLabel}</span> ${summary}</p>` : ""}
+	</article>`;
 }
 
 function renderSourceContent(
