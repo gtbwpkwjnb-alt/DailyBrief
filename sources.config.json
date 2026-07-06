@@ -672,5 +672,105 @@
     "locales": [
       "zh"
     ]
+  },
+  {
+    "id": "france24",
+    "name": "France 24",
+    "type": "rss",
+    "url": "https://www.france24.com/en/rss",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "nhk-world",
+    "name": "NHK World",
+    "type": "rss",
+    "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "scmp-china",
+    "name": "SCMP China",
+    "type": "rss",
+    "url": "https://www.scmp.com/rss/4/feed",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "hindu-international",
+    "name": "The Hindu",
+    "type": "rss",
+    "url": "https://www.thehindu.com/news/international/feeder/default.rss",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "washingtonpost-world",
+    "name": "Washington Post",
+    "type": "rss",
+    "url": "https://feeds.washingtonpost.com/rss/world",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "nikkei-asia",
+    "name": "Nikkei Asia",
+    "type": "rss",
+    "url": "https://asia.nikkei.com/rss/feed",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "ap-world",
+    "name": "AP News",
+    "type": "rss",
+    "url": "https://feeds.ap.org/ap/world.rss",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "japantimes",
+    "name": "Japan Times",
+    "type": "rss",
+    "url": "https://www.japantimes.co.jp/feed/",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "straitstimes-asia",
+    "name": "Straits Times",
+    "type": "rss",
+    "url": "https://www.straitstimes.com/news/asia/rss.xml",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "toi-world",
+    "name": "Times of India",
+    "type": "rss",
+    "url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
+    "category": "politics",
+    "subcategory": "world",
+    "enabled": true,
+    "locales": ["zh", "en"]
   }
 ]
