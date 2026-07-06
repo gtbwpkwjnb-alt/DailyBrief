@@ -45,6 +45,7 @@ export interface ArticleInput extends RawArticle {
 }
 
 const PER_CATEGORY_LIMIT: Record<Category, number> = {
+  trending: 20,
   tech: 25,
   finance: 20,
   politics: 15,
@@ -197,6 +198,7 @@ export async function generateDailyReport(
   articles: ArticleInput[],
 ): Promise<{ report: DailyReport; tokensUsed: number }> {
   const grouped: Record<Category, ArticleInput[]> = {
+    trending: [],
     tech: [],
     finance: [],
     politics: [],

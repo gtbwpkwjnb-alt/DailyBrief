@@ -25,11 +25,12 @@ import {
  */
 const TEXTS_ZH = {
   siteTitle: "每日简报",
-  catTech: "技术动态",
-  catFinance: "财经要点",
-  catPolitics: "时政观察",
-  catTrading: "市场行情",
-  catCommunity: "社区讨论",
+  catTrending: "🔥 热搜趋势",
+  catTech: "🧑‍💻 技术动态",
+  catFinance: "💰 财经要点",
+  catPolitics: "🌍 国际时政",
+  catTrading: "📈 市场行情",
+  catCommunity: "💬 社区讨论",
   subAiNews: "AI 媒体",
   subTrendingPapers: "热门论文",
   subXViral: "X 推文",
@@ -74,11 +75,12 @@ const TEXTS_ZH = {
 
 const TEXTS_EN: typeof TEXTS_ZH = {
   siteTitle: "Daily Brief",
-  catTech: "Tech",
-  catFinance: "Finance",
-  catPolitics: "World",
-  catTrading: "Markets",
-  catCommunity: "Community",
+  catTrending: "🔥 Trending",
+  catTech: "💻 Tech",
+  catFinance: "💰 Finance",
+  catPolitics: "🌍 World",
+  catTrading: "📈 Markets",
+  catCommunity: "💬 Community",
   subAiNews: "AI Media",
   subTrendingPapers: "Trending Papers",
   subXViral: "X Viral",
@@ -150,12 +152,14 @@ export type RawByCategory = Record<Category, SubGroup[]>;
 // ----- labels & ordering -----
 
 const CATEGORY_LABELS: Record<Category, string> = {
+  trending: STR.catTrending,
   tech: STR.catTech,
   finance: STR.catFinance,
   politics: STR.catPolitics,
 };
 
 const CATEGORY_DIGEST_LABELS: Record<Category, string> = {
+  trending: STR.catTrending,
   tech: STR.catTech,
   finance: STR.catFinance,
   politics: STR.catPolitics,
@@ -171,15 +175,18 @@ const SUBCATEGORY_ORDER: Partial<Record<Category, string[]>> = {
   // Locale filtering at registry level decides which actually appears:
   // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
   // overseas-community (Hacker News / r/stocks).
+  trending: ["google-trends", "reddit-trending"],
   tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "cn-community", "overseas-community"],
   finance: ["news"],
-  politics: ["world"],
+  politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
 };
 
 const TECH_MAIN_SUBS = new Set(["github-trending", "trending-papers", "x-viral", "ai-news"]);
 const TECH_COMMUNITY_SUBS = new Set(["cn-community", "overseas-community"]);
 
 const SUBCATEGORY_LABELS: Record<string, string> = {
+  "google-trends": "Google 热搜",
+  "reddit-trending": "Reddit 热门",
   "github-trending": "GitHub Trending",
   "trending-papers": STR.subTrendingPapers,
   "cn-community": STR.subCnCommunity,
@@ -188,6 +195,13 @@ const SUBCATEGORY_LABELS: Record<string, string> = {
   "x-viral": STR.subXViral,
   "blog-weekly": STR.subBlogWeekly,
   news: STR.subFinanceNews,
+  uk: "🇬🇧 英国",
+  us: "🇺🇸 美国",
+  france: "🇫🇷 法国",
+  japan: "🇯🇵 日本",
+  india: "🇮🇳 印度",
+  "east-asia": "🌏 东亚",
+  other: "🌐 其他",
   world: STR.subWorld,
 };
 
@@ -239,9 +253,17 @@ function displayLimitFor(
  * Exported so daily.ts can read the cap to keep enrichment in sync.
  */
 export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
+  "trending:google-trends": 10,
+  "trending:reddit-trending": 10,
   "tech:ai-news": 15,
   "finance:news": 12,
-  "politics:world": 15,
+  "politics:uk": 5,
+  "politics:us": 5,
+  "politics:france": 5,
+  "politics:japan": 5,
+  "politics:india": 5,
+  "politics:east-asia": 5,
+  "politics:other": 5,
 };
 
 /**
@@ -283,6 +305,7 @@ export function groupRaw(
 
   type Bucket = { sourceName: string; items: ArticleInput[] };
   const buckets: Record<Category, Map<string, Bucket>> = {
+    trending: new Map(),
     tech: new Map(),
     finance: new Map(),
     politics: new Map(),
@@ -346,7 +369,7 @@ export function groupRaw(
     });
   }
 
-  const out: RawByCategory = { tech: [], finance: [], politics: [] };
+  const out: RawByCategory = { trending: [], tech: [], finance: [], politics: [] };
 
   for (const cat of Object.keys(buckets) as Category[]) {
     const order = SUBCATEGORY_ORDER[cat];
@@ -454,7 +477,7 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const sourceLabel = showSource && a.source ? escapeHtml(a.source) : "";
   const metaLine = [sourceLabel, time].filter(Boolean).join(" · ");
   // News-style summary label for finance/politics, project-intro style for GH/tech.
-  const newsy = a.category === "finance" || a.category === "politics";
+  const newsy = a.category === "trending" || a.category === "finance" || a.category === "politics";
   const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
   return `<article class="article">
 	  <h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>
@@ -547,6 +570,7 @@ export function renderHtml(
       0,
     );
   const counts = {
+    trending: sumItems(raw.trending),
     tech: sumItems(techMainSubs),
     finance: sumItems(raw.finance),
     politics: sumItems(raw.politics),
@@ -1199,14 +1223,18 @@ export function renderHtml(
   </header>
 
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
+    ${raw.trending.length > 0 ? `<button class="tab active" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
+    <button class="tab${raw.trending.length > 0 ? "" : " active"}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
     ${trading ? `<button class="tab" data-tab="trading">${STR.catTrading}<span class="count">${trading.tickers.length}</span></button>` : ""}
     <button class="tab" data-tab="politics">${CATEGORY_LABELS.politics}<span class="count">${counts.politics}</span></button>
     <button class="tab" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>
     ${techCommunitySubs.length > 0 ? `<button class="tab" data-tab="community">${STR.catCommunity}<span class="count">${counts.community}</span></button>` : ""}
   </nav>
 
-  <section class="panel active" data-panel="tech">
+  <section class="panel${raw.trending.length > 0 ? " active" : ""}" data-panel="trending">
+    ${renderRawCategoryPanel("trending", raw.trending)}
+  </section>
+  <section class="panel${raw.trending.length > 0 ? "" : " active"}" data-panel="tech">
     ${renderRawCategoryPanel("tech", techMainSubs)}
   </section>
   ${trading ? `<section class="panel" data-panel="trading">${renderTradingPanel(trading)}</section>` : ""}

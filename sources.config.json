@@ -545,7 +545,7 @@
     "type": "rss",
     "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "uk",
     "enabled": true,
     "locales": [
       "zh",
@@ -558,7 +558,7 @@
     "type": "rss",
     "url": "https://www.theguardian.com/world/rss",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "uk",
     "enabled": true,
     "locales": [
       "zh",
@@ -571,7 +571,7 @@
     "type": "rss",
     "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "us",
     "enabled": true,
     "locales": [
       "zh",
@@ -584,7 +584,7 @@
     "type": "rss",
     "url": "https://feeds.npr.org/1004/rss.xml",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "us",
     "enabled": true,
     "locales": [
       "zh",
@@ -597,7 +597,7 @@
     "type": "rss",
     "url": "https://rss.dw.com/rdf/rss-chi-all",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "other",
     "enabled": true,
     "locales": [
       "zh"
@@ -609,7 +609,7 @@
     "type": "rss",
     "url": "https://www.aljazeera.com/xml/rss/all.xml",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "other",
     "enabled": true,
     "locales": [
       "zh",
@@ -622,7 +622,7 @@
     "type": "rss",
     "url": "https://thediplomat.com/feed/",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "east-asia",
     "enabled": true,
     "locales": [
       "zh",
@@ -679,7 +679,7 @@
     "type": "rss",
     "url": "https://www.france24.com/en/rss",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "france",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -689,7 +689,7 @@
     "type": "rss",
     "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "japan",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -699,7 +699,7 @@
     "type": "rss",
     "url": "https://www.scmp.com/rss/4/feed",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "east-asia",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -709,7 +709,7 @@
     "type": "rss",
     "url": "https://www.thehindu.com/news/international/feeder/default.rss",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "india",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -719,7 +719,7 @@
     "type": "rss",
     "url": "https://feeds.washingtonpost.com/rss/world",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "us",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -729,7 +729,7 @@
     "type": "rss",
     "url": "https://asia.nikkei.com/rss/feed",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "east-asia",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -739,7 +739,7 @@
     "type": "rss",
     "url": "https://feeds.ap.org/ap/world.rss",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "us",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -749,7 +749,7 @@
     "type": "rss",
     "url": "https://www.japantimes.co.jp/feed/",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "japan",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -759,7 +759,7 @@
     "type": "rss",
     "url": "https://www.straitstimes.com/news/asia/rss.xml",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "east-asia",
     "enabled": true,
     "locales": ["zh", "en"]
   },
@@ -769,7 +769,84 @@
     "type": "rss",
     "url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
     "category": "politics",
-    "subcategory": "world",
+    "subcategory": "india",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "google-trends-us",
+    "name": "Google 热搜 · 美国",
+    "type": "rss",
+    "url": "https://trends.google.com/trending/rss?geo=US",
+    "category": "trending",
+    "subcategory": "google-trends",
+    "lang": "en",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "google-trends-jp",
+    "name": "Google 热搜 · 日本",
+    "type": "rss",
+    "url": "https://trends.google.com/trending/rss?geo=JP",
+    "category": "trending",
+    "subcategory": "google-trends",
+    "lang": "en",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "google-trends-gb",
+    "name": "Google 热搜 · 英国",
+    "type": "rss",
+    "url": "https://trends.google.com/trending/rss?geo=GB",
+    "category": "trending",
+    "subcategory": "google-trends",
+    "lang": "en",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "google-trends-fr",
+    "name": "Google 热搜 · 法国",
+    "type": "rss",
+    "url": "https://trends.google.com/trending/rss?geo=FR",
+    "category": "trending",
+    "subcategory": "google-trends",
+    "lang": "en",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "google-trends-in",
+    "name": "Google 热搜 · 印度",
+    "type": "rss",
+    "url": "https://trends.google.com/trending/rss?geo=IN",
+    "category": "trending",
+    "subcategory": "google-trends",
+    "lang": "en",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "google-trends-de",
+    "name": "Google 热搜 · 德国",
+    "type": "rss",
+    "url": "https://trends.google.com/trending/rss?geo=DE",
+    "category": "trending",
+    "subcategory": "google-trends",
+    "lang": "en",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
+    "id": "reddit-popular",
+    "name": "Reddit 热门",
+    "type": "rss",
+    "url": "https://www.reddit.com/r/popular/.rss",
+    "category": "trending",
+    "subcategory": "reddit-trending",
+    "useCurl": true,
     "enabled": true,
     "locales": ["zh", "en"]
   }
