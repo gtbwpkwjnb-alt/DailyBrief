@@ -265,7 +265,7 @@ export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
   "politics:japan": 5,
   "politics:india": 5,
   "politics:east-asia": 5,
-  "politics:other": 5,
+	  "politics:other": 8,
 };
 
 /**
@@ -481,13 +481,13 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   // News-style summary label for finance/politics, project-intro style for GH/tech.
   const newsy = a.category === "trending" || a.category === "finance" || a.category === "politics";
   const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
-  return `<article class="article">
-	  <h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>
-	  ${meta ? `<p class="article-stats">${meta}</p>` : ""}
-	  ${metaLine ? `<p class="article-meta">${metaLine}</p>` : ""}
-	  ${REPORT_LOCALE === "en" && excerpt ? `<p class="article-excerpt">${excerpt}</p>` : ""}
+	  return `<article class="article">
+		  <h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>
+		  ${meta ? `<p class="article-stats">${meta}</p>` : ""}
+		  ${metaLine ? `<p class="article-meta">${metaLine}</p>` : ""}
 		  ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
-	</article>`;
+		  ${excerpt ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
+		</article>`;
 }
 
 function renderSourceContent(
@@ -931,22 +931,23 @@ export function renderHtml(
     margin: 0 0 0.4rem;
     font-feature-settings: "tnum";
   }
-  .article-excerpt {
-    margin: 0;
-    color: var(--fg-soft);
-    font-size: 0.9rem;
-    line-height: 1.6;
-  }
-  .article-summary {
-    margin: 0.55rem 0 0;
-    padding: 0.6rem 0.85rem;
-    background: var(--card);
-    border-left: 2px solid var(--link);
-    border-radius: 0.3rem;
-    font-size: 0.9rem;
-    line-height: 1.6;
-    color: var(--fg);
-  }
+	  .article-excerpt {
+	    margin: 0.35rem 0 0;
+	    color: var(--muted);
+	    font-size: 0.75rem;
+	    line-height: 1.45;
+	    font-style: italic;
+	  }
+	  .article-summary {
+	    margin: 0 0 0;
+	    padding: 0.6rem 0.85rem;
+	    background: var(--card);
+	    border-left: 2px solid var(--link);
+	    border-radius: 0.3rem;
+	    font-size: 0.9rem;
+	    line-height: 1.6;
+	    color: var(--fg);
+	  }
   .summary-label {
     display: inline-block;
     font-size: 0.68rem;

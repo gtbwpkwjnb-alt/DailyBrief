@@ -646,7 +646,8 @@
     "type": "rss",
     "url": "http://www.people.com.cn/rss/world.xml",
     "category": "politics",
-    "enabled": false,
+    "subcategory": "other",
+    "enabled": true,
     "locales": [
       "zh"
     ]
@@ -657,7 +658,8 @@
     "type": "rss",
     "url": "http://www.xinhuanet.com/politics/news_politics.xml",
     "category": "politics",
-    "enabled": false,
+    "subcategory": "other",
+    "enabled": true,
     "locales": [
       "zh"
     ]
@@ -774,6 +776,27 @@
     "locales": ["zh", "en"]
   },
   {
+    "id": "bbc-chinese",
+    "name": "BBC 中文",
+    "type": "rss",
+    "url": "https://www.bbc.com/zhongwen/simp/index.xml",
+    "category": "politics",
+    "subcategory": "other",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
+    "id": "china-daily-world",
+    "name": "中国日报国际",
+    "type": "rss",
+    "url": "https://www.chinadaily.com.cn/rss/world.xml",
+    "category": "politics",
+    "subcategory": "other",
+    "enabled": true,
+    "locales": ["zh", "en"]
+  },
+  {
     "id": "google-trends-us",
     "name": "Google 热搜 · 美国",
     "type": "rss",
@@ -855,6 +878,28 @@
     "name": "知乎热榜",
     "type": "rss",
     "url": "https://rsshub.app/zhihu/hotlist",
+    "category": "trending",
+    "subcategory": "cn-trending",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
+    "id": "baidu-hot-search",
+    "name": "百度热搜",
+    "type": "rss",
+    "url": "https://rsshub.app/baidu/top",
+    "category": "trending",
+    "subcategory": "cn-trending",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
+    "id": "douyin-hot",
+    "name": "抖音热榜",
+    "type": "rss",
+    "url": "https://rsshub.app/douyin/hot",
     "category": "trending",
     "subcategory": "cn-trending",
     "lang": "zh",
