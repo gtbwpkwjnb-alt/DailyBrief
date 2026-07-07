@@ -193,17 +193,31 @@ async function enrichMergedSubgroup(
     subSources.filter((s) => (s.lang ?? "en") === REPORT_LOCALE).map((s) => s.id),
   );
   const limit = MERGED_SUBGROUP_LIMITS[`${category}:${subcategory}`] ?? 12;
-  // Top-N respects all enabled sources (so we don't reshape the merged
-  // timeline). Enrichment only targets items NOT already in the target
-  // language within that slice.
-  const top = articles
+  // Round-robin selection preserving each source's feed order (heat),
+  // matching the display logic in render.ts groupRaw. This ensures the
+  // items that get enriched are the same ones that appear in the panel.
+  const candidates = articles
     .filter((a) => enabledIds.has(a.sourceId))
-    .filter((a) => category !== "politics" || !isSportsArticle(a.title))
-    .sort(
-      (a, b) =>
-        (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
-    )
-    .slice(0, limit);
+    .filter((a) => category !== "politics" || !isSportsArticle(a.title));
+  // Group by sourceId preserving per-source order
+  const bySource = new Map<string, ArticleInput[]>();
+  for (const a of candidates) {
+    const arr = bySource.get(a.sourceId) ?? [];
+    arr.push(a);
+    bySource.set(a.sourceId, arr);
+  }
+  const buckets = Array.from(bySource.values());
+  const top: ArticleInput[] = [];
+  let madeProgress = true;
+  while (top.length < limit && madeProgress) {
+    madeProgress = false;
+    for (const b of buckets) {
+      if (b.length === 0) continue;
+      top.push(b.shift()!);
+      madeProgress = true;
+      if (top.length >= limit) break;
+    }
+  }
   const toEnrich = top.filter((a) => !sameLocaleIds.has(a.sourceId));
   if (toEnrich.length === 0) return;
   console.log(

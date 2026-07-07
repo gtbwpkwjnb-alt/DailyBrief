@@ -257,15 +257,15 @@ export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
 	  "trending:google-trends": 10,
 	  "trending:cn-trending": 10,
 	  "trending:reddit-trending": 10,
-  "tech:ai-news": 15,
-  "finance:news": 12,
-  "politics:uk": 5,
-  "politics:us": 5,
-  "politics:france": 5,
-  "politics:japan": 5,
-  "politics:india": 5,
-  "politics:east-asia": 5,
-	  "politics:other": 8,
+	  "tech:ai-news": 15,
+	  "finance:news": 12,
+	  "politics:uk": 15,
+	  "politics:us": 15,
+	  "politics:france": 15,
+	  "politics:japan": 15,
+	  "politics:india": 15,
+	  "politics:east-asia": 15,
+	  "politics:other": 15,
 };
 
 /**
@@ -391,18 +391,26 @@ export function groupRaw(
     for (const subId of order) {
       const mergeLimit = mergedLimitFor(cat, subId);
       if (mergeLimit !== undefined) {
-        // Merge: flatten all sources under this subcategory into a single
-        // time-sorted SourceGroup. Articles keep their `source` field so
-        // the renderer can label them.
-        const flat: ArticleInput[] = [];
+        // Merge: round-robin across sources preserving each source's
+        // natural feed order (which reflects editorial priority / heat),
+        // rather than flattening by date. This ensures top stories from
+        // each source get equal opportunity regardless of publish time.
+        const buckets: ArticleInput[][] = [];
         for (const [id, b] of buckets[cat].entries()) {
-          if (subcatOf.get(id) === subId) flat.push(...b.items);
+          if (subcatOf.get(id) === subId) buckets.push(b.items);
         }
-        if (flat.length === 0) continue;
-        flat.sort(
-          (a, b) =>
-            (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
-        );
+        if (buckets.length === 0) continue;
+        const merged: ArticleInput[] = [];
+        let madeProgress = true;
+        while (merged.length < mergeLimit && madeProgress) {
+          madeProgress = false;
+          for (const b of buckets) {
+            if (b.length === 0) continue;
+            merged.push(b.shift()!);
+            madeProgress = true;
+            if (merged.length >= mergeLimit) break;
+          }
+        }
         subs.push({
           id: subId,
           name: SUBCATEGORY_LABELS[subId] ?? subId,
