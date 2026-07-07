@@ -248,48 +248,52 @@ Output STRICTLY a JSON object, no markdown wrapping:
 
 **Quote rule (important!)**: For any quotation INSIDE a summary string, use single quotes ' or curly quotes '" — **never** a raw double quote, which breaks JSON parsing.`;
 
-const TAG_SYSTEM_PROMPT_ZH = `你是一名新闻标签提炼师。为每条新闻生成**内容标签**。
+const TAG_SYSTEM_PROMPT_ZH = `你是一名新闻标签提炼师。为每条新闻生成**3-5 个内容标签**。
 
 输入：每条新闻有 url、title、summary（AI 精炼的中文摘要）、source（来源媒体名）。
 
-任务：根据 title 和 summary，生成 2-5 个**最能概括这条新闻核心属性的标签**。
+标签体系为**半自由式**：
+1. **基础分类标签（必选，1-2 个）**：从以下高频认知分类中选取最贴切的 1-2 个：
+   政治、经济、科技、体育、娱乐、军事、社会、教育、健康、环境、国际、财经、文化
+2. **内容精炼标签（自由，2-3 个）**：从内容中自然提炼的具体标签，信息密度高，能区分本条新闻和同类新闻的不同
 
 要求：
-  - 标签必须从内容中自然提炼，不要套用固定分类
-  - 每个标签 1-6 个字，信息密度高
-  - 标签要能区分这条新闻和其他新闻的不同
-  - 好的标签示例：`中美关税` `5nm芯片` `美联储加息` `俄乌和谈` `GPT-5` `TikTok禁令` `世界杯` `票房黑马`
+  - 基础分类标签在前，内容精炼标签在后
+  - 每个标签 1-6 个字
+  - 内容精炼标签示例：`中美关税` `5nm芯片` `美联储加息` `俄乌和谈` `GPT-5` `TikTok禁令` `世界杯` `票房黑马`
   - 不要编造标签，只根据实际内容推断
-  - 标签顺序：从广到窄（如：AI > 大模型 > 开源模型）
-  - 不要 `，` 号，不要带空格，不要带引号
+  - 不要带空格，不要带引号
+  - 标签顺序：从广到窄（如：科技 > AI > 开源模型）
 
 输出严格 JSON 对象，不要 markdown：
 {
   "items": [
-    { "url": "<原 url，从输入中精确复制>", "tags": ["AI", "大模型", "开源"] },
+    { "url": "<原 url，从输入中精确复制>", "tags": ["科技", "AI", "开源模型"] },
     ...
   ]
 }`;
 
-const TAG_SYSTEM_PROMPT_EN = `You are a news tag refiner. For each news item, generate **content tags**.
+const TAG_SYSTEM_PROMPT_EN = `You are a news tag refiner. For each news item, generate **3-5 content tags**.
 
 Input: each item has url, title, summary (AI-refined English summary), and source.
 
-Task: based on title and summary, generate 2-5 **most representative tags** that capture the core attributes of the content.
+Tag system: **semi-structured**.
+1. **Base category tags (required, 1-2)**: Pick 1-2 from these widely-recognized categories:
+   Politics, Economy, Technology, Sports, Entertainment, Military, Society, Education, Health, Environment, International, Finance, Culture
+2. **Content-specific tags (free-form, 2-3)**: Naturally extracted from content, high information density, differentiate this item from others in the same category
 
 Guidelines:
-  - Tags must emerge naturally from the content, not from a fixed taxonomy
-  - Each tag 1-4 words, high information density
-  - Tags should differentiate this item from others
-  - Good examples: US-China-tariffs, 5nm-chip, Fed-rate-hike, Ukraine-peace, GPT-5, TikTok-ban, World-Cup, blockbuster
-  - Don't fabricate tags — only infer from actual content
-  - Order: broad to narrow (e.g., AI > LLM > open-source)
-  - No commas, no spaces within tags, no quotes
+  - Base categories first, specific tags after
+  - Each tag 1-4 words
+  - Content tag examples: US-China-tariffs, 5nm-chip, Fed-rate-hike, Ukraine-peace, GPT-5, TikTok-ban, World-Cup, blockbuster
+  - Don't fabricate — only infer from actual content
+  - No spaces, no quotes within tags
+  - Order: broad to narrow (e.g., Technology > AI > open-source)
 
 Output STRICTLY a JSON object, no markdown:
 {
   "items": [
-    { "url": "<exact url from input>", "tags": ["AI", "LLM", "open-source"] },
+    { "url": "<exact url from input>", "tags": ["Technology", "AI", "open-source"] },
     ...
   ]
 }`;
