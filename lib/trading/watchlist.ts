@@ -19,7 +19,7 @@ export function getDisplayName(t: TickerDef, locale: "zh" | "en"): string {
 const ASSET_GROUP_LABELS_ZH: Record<AssetGroup, string> = {
   "us-equity": "美股 / ETF",
   crypto: "加密货币",
-  "china-equity": "中概 / 港股",
+  "china-equity": "中概 / 港股 / A 股",
   "commodity-fx": "商品 / 外汇",
   macro: "宏观信号",
 };
@@ -60,7 +60,10 @@ export const WATCHLIST: TickerDef[] = [
   { symbol: "BTC-USD", displayName: "Bitcoin", group: "crypto" },
   { symbol: "ETH-USD", displayName: "Ethereum", group: "crypto" },
   { symbol: "SOL-USD", displayName: "Solana", group: "crypto" },
-  // === 中概 / 港股 ===
+  // === 中概 / 港股 / A 股 ===
+  { symbol: "000001.SS", displayName: "上证指数", displayNameEn: "Shanghai Composite", group: "china-equity" },
+  { symbol: "399001.SZ", displayName: "深证成指", displayNameEn: "Shenzhen Component", group: "china-equity" },
+  { symbol: "399006.SZ", displayName: "创业板指", displayNameEn: "ChiNext Index", group: "china-equity" },
   { symbol: "BABA", displayName: "阿里巴巴 (BABA)", displayNameEn: "Alibaba (BABA)", group: "china-equity" },
   { symbol: "PDD", displayName: "拼多多 (PDD)", displayNameEn: "Pinduoduo (PDD)", group: "china-equity" },
   { symbol: "JD", displayName: "京东 (JD)", displayNameEn: "JD.com (JD)", group: "china-equity" },

@@ -44,7 +44,7 @@
     "url": "https://juejin.cn/rss",
     "category": "tech",
     "subcategory": "cn-community",
-    "enabled": false,
+    "enabled": true,
     "locales": [
       "zh"
     ]
@@ -81,7 +81,7 @@
     "category": "tech",
     "subcategory": "ai-news",
     "lang": "zh",
-    "enabled": false,
+    "enabled": true,
     "locales": [
       "zh"
     ]
@@ -840,6 +840,28 @@
     "locales": ["zh", "en"]
   },
   {
+    "id": "weibo-hot-search",
+    "name": "微博热搜",
+    "type": "rss",
+    "url": "https://rsshub.app/weibo/search/hot",
+    "category": "trending",
+    "subcategory": "cn-trending",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
+    "id": "zhihu-hotlist",
+    "name": "知乎热榜",
+    "type": "rss",
+    "url": "https://rsshub.app/zhihu/hotlist",
+    "category": "trending",
+    "subcategory": "cn-trending",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
     "id": "reddit-popular",
     "name": "Reddit 热门",
     "type": "rss",
@@ -849,5 +871,38 @@
     "useCurl": true,
     "enabled": true,
     "locales": ["zh", "en"]
+  },
+  {
+    "id": "huxiu",
+    "name": "虎嗅",
+    "type": "rss",
+    "url": "https://rss.huxiu.com/",
+    "category": "tech",
+    "subcategory": "cn-community",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
+    "id": "kr-36-hotlist",
+    "name": "36氪热榜",
+    "type": "rss",
+    "url": "https://rsshub.app/36kr/hot-list",
+    "category": "tech",
+    "subcategory": "cn-community",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
+  },
+  {
+    "id": "bilibili-ranking",
+    "name": "B站排行榜",
+    "type": "rss",
+    "url": "https://rsshub.app/bilibili/ranking/0/3/1",
+    "category": "tech",
+    "subcategory": "cn-community",
+    "lang": "zh",
+    "enabled": true,
+    "locales": ["zh"]
   }
 ]

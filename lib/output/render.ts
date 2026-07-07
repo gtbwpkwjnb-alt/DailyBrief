@@ -47,7 +47,7 @@ const TEXTS_ZH = {
   emptyGroup: "该组今日无数据。",
   footer: "内容均来自原媒体，本站仅作摘要整理与回链。",
   summaryLabelNews: "中文摘要",
-  summaryLabelIntro: "中文介绍",
+  summaryLabelIntro: "",
   tradingMarketOverview: "市场总览",
   tradingTodayFocus: "今日关注",
   tradingAllAssets: "全部资产",
@@ -175,7 +175,7 @@ const SUBCATEGORY_ORDER: Partial<Record<Category, string[]>> = {
   // Locale filtering at registry level decides which actually appears:
   // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
   // overseas-community (Hacker News / r/stocks).
-  trending: ["google-trends", "reddit-trending"],
+	  trending: ["google-trends", "cn-trending", "reddit-trending"],
   tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "cn-community", "overseas-community"],
   finance: ["news"],
   politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
@@ -185,8 +185,9 @@ const TECH_MAIN_SUBS = new Set(["github-trending", "trending-papers", "x-viral",
 const TECH_COMMUNITY_SUBS = new Set(["cn-community", "overseas-community"]);
 
 const SUBCATEGORY_LABELS: Record<string, string> = {
-  "google-trends": "Google 热搜",
-  "reddit-trending": "Reddit 热门",
+	  "google-trends": "Google 热搜",
+	  "cn-trending": "🔥 中文热搜",
+	  "reddit-trending": "Reddit 热门",
   "github-trending": "GitHub Trending",
   "trending-papers": STR.subTrendingPapers,
   "cn-community": STR.subCnCommunity,
@@ -253,8 +254,9 @@ function displayLimitFor(
  * Exported so daily.ts can read the cap to keep enrichment in sync.
  */
 export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
-  "trending:google-trends": 10,
-  "trending:reddit-trending": 10,
+	  "trending:google-trends": 10,
+	  "trending:cn-trending": 10,
+	  "trending:reddit-trending": 10,
   "tech:ai-news": 15,
   "finance:news": 12,
   "politics:uk": 5,
@@ -484,7 +486,7 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
 	  ${meta ? `<p class="article-stats">${meta}</p>` : ""}
 	  ${metaLine ? `<p class="article-meta">${metaLine}</p>` : ""}
 	  ${REPORT_LOCALE === "en" && excerpt ? `<p class="article-excerpt">${excerpt}</p>` : ""}
-	  ${summary ? `<p class="article-summary"><span class="summary-label">${summaryLabel}</span> ${summary}</p>` : ""}
+		  ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
 	</article>`;
 }
 

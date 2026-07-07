@@ -14,7 +14,9 @@ import {
   enrichFinanceNewsSummaries,
   enrichGithubTrendingSummaries,
   enrichTrendingPapersSummaries,
+  enrichTrendingSummaries,
   enrichXViralSummaries,
+  type EnrichInput,
 } from "../lib/ai/enrich";
 import {
   groupRaw,
@@ -77,11 +79,30 @@ async function enrichFinanceNews(articles: ArticleInput[]): Promise<void> {
 }
 
 async function enrichPolitics(articles: ArticleInput[]): Promise<void> {
-  await enrichMergedSubgroup(articles, "politics", "world");
+  // Politics sources are split across subcategories (uk, us, france, japan,
+  // india, east-asia, other). Enrich each subcategory individually.
+  const POLITICS_SUBS = ["uk", "us", "france", "japan", "india", "east-asia", "other"];
+  for (const sub of POLITICS_SUBS) {
+    await enrichMergedSubgroup(articles, "politics", sub);
+  }
 }
 
 async function enrichAiNews(articles: ArticleInput[]): Promise<void> {
   await enrichMergedSubgroup(articles, "tech", "ai-news");
+}
+
+/**
+ * Enrich trending content (Google Trends keywords, Reddit popular posts)
+ * with Chinese translations/summaries. Uses the merged-subgroup pattern
+ * for google-trends and reddit-trending, plus cn-trending sources are
+ * already in Chinese and skipped.
+ */
+async function enrichTrending(articles: ArticleInput[]): Promise<void> {
+  // Enrich Google Trends (English keywords → Chinese)
+  await enrichMergedSubgroup(articles, "trending", "google-trends", enrichTrendingSummaries);
+  // Enrich Reddit popular (English titles → Chinese)
+  await enrichMergedSubgroup(articles, "trending", "reddit-trending", enrichTrendingSummaries);
+  // cn-trending sources (微博热搜, 知乎热榜) are already in Chinese — no enrichment needed
 }
 
 /**
@@ -157,8 +178,9 @@ async function enrichTrendingPapers(articles: ArticleInput[]): Promise<void> {
  */
 async function enrichMergedSubgroup(
   articles: ArticleInput[],
-  category: "tech" | "finance" | "politics",
+  category: "tech" | "finance" | "politics" | "trending",
   subcategory: string,
+  summarizer?: (items: EnrichInput[]) => Promise<Map<string, string>>,
 ): Promise<void> {
   const subSources = sources.filter(
     (s) =>
@@ -188,7 +210,8 @@ async function enrichMergedSubgroup(
     `[daily] enriching ${toEnrich.length}/${top.length} ${category}:${subcategory} items with ${REPORT_LOCALE} summaries…`,
   );
   const t0 = Date.now();
-  const summaries = await enrichFinanceNewsSummaries(toEnrich);
+  const enrichFn = summarizer ?? enrichFinanceNewsSummaries;
+  const summaries = await enrichFn(toEnrich);
   for (const a of toEnrich) {
     const s = summaries.get(a.url);
     if (s) a.summary = s;
@@ -257,6 +280,7 @@ async function main() {
   await enrichFinanceNews(articles);
   await enrichPolitics(articles);
   await enrichAiNews(articles);
+  await enrichTrending(articles);
   await enrichXViral(articles);
 
   // Trading signals: Yahoo fetch + indicators + commentary. Non-fatal —
