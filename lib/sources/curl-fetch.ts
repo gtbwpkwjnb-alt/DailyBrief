@@ -16,7 +16,7 @@ const execFileP = promisify(execFile);
 export async function curlFetch(
   url: string,
   headers: Record<string, string> = {},
-  timeoutSec = 20,
+  timeoutSec = 12,
 ): Promise<string> {
   const args = ["-sSL", "-m", String(timeoutSec), "--compressed"];
   for (const [k, v] of Object.entries(headers)) {
