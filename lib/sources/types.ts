@@ -66,4 +66,10 @@ export interface RawArticle {
    * used by GitHub Trending for "Language · ★stars · forks · stars today".
    */
   meta?: string;
+  /**
+   * AI-generated content attribute tags, e.g. ["官媒", "政治", "战争"].
+   * Set by the tag enrichment step after summary generation.
+   * Tags enable retrieval, linking, and cross-referencing in Obsidian KB.
+   */
+  tags?: string[];
 }

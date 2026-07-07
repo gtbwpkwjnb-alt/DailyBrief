@@ -16,6 +16,7 @@ import {
   enrichTrendingPapersSummaries,
   enrichTrendingSummaries,
   enrichXViralSummaries,
+  enrichContentTags,
   type EnrichInput,
 } from "../lib/ai/enrich";
 import {
@@ -166,6 +167,40 @@ async function enrichTrendingPapers(articles: ArticleInput[]): Promise<void> {
 }
 
 /**
+ * Generate content attribute tags for all enriched articles.
+ * Runs once after all summary enrichments complete, sending every article
+ * that has a summary in a single batch LLM call.
+ */
+async function enrichTags(articles: ArticleInput[]): Promise<void> {
+  // Only tag articles that have a summary (skips zh-only sources)
+  const toTag = articles.filter((a) => a.summary);
+  if (toTag.length === 0) return;
+  console.log(
+    `[daily] tagging ${toTag.length} articles with content attributes…`,
+  );
+  const t0 = Date.now();
+  const tags = await enrichContentTags(
+    toTag.map((a) => ({
+      url: a.url,
+      title: a.title,
+      excerpt: a.summary, // pass the AI summary as "excerpt" for classification
+      source: a.source,
+    })),
+  );
+  let matched = 0;
+  for (const a of toTag) {
+    const t = tags.get(a.url);
+    if (t && t.length > 0) {
+      a.tags = t;
+      matched++;
+    }
+  }
+  console.log(
+    `[daily] tagging done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${matched}/${toTag.length}`,
+  );
+}
+
+/**
  * Shared implementation for "merged subgroup" enrichment: collect all
  * enabled articles in (category, subcategory), sort by date desc, take
  * the display cap (from MERGED_SUBGROUP_LIMITS), and ask the LLM to
@@ -296,6 +331,7 @@ async function main() {
   await enrichAiNews(articles);
   await enrichTrending(articles);
   await enrichXViral(articles);
+  await enrichTags(articles);
 
   // Trading signals: Yahoo fetch + indicators + commentary. Non-fatal —
   // if it errors, we still ship the news digest.

@@ -482,20 +482,37 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   // Backwards-compat: old sidecar JSON files may carry `cnSummary` instead.
   const summaryText = a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary;
   const summary = summaryText ? escapeHtml(summaryText) : "";
-  const meta = a.meta ? escapeHtml(a.meta) : "";
+  const stats = a.meta ? escapeHtml(a.meta) : "";
   const time = formatDate(a.publishedAt);
   const sourceLabel = showSource && a.source ? escapeHtml(a.source) : "";
-  const metaLine = [sourceLabel, time].filter(Boolean).join(" · ");
+  // For merged subgroups (politics/finance/trending), the source name + time
+  // identifies the article → no need for the full English headline.
+  // For per-source tabs (GH Trending, Papers, X), show a brief title.
+  // When showSource is true, we're inside a merged group → hide the title.
+  const showTitle = !showSource;
+  // Build meta line: source name (clickable link) + rest of meta
+  let metaHtml = "";
+  if (sourceLabel) {
+    const sourceLink = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-source-link">${sourceLabel}</a>`;
+    metaHtml = time ? `${sourceLink} · ${time}` : sourceLink;
+  } else if (time) {
+    metaHtml = time;
+  }
   // News-style summary label for finance/politics, project-intro style for GH/tech.
   const newsy = a.category === "trending" || a.category === "finance" || a.category === "politics";
   const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
-	  return `<article class="article">
-		  <h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>
-		  ${meta ? `<p class="article-stats">${meta}</p>` : ""}
-		  ${metaLine ? `<p class="article-meta">${metaLine}</p>` : ""}
-		  ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
-		  ${excerpt ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
-		</article>`;
+  // Content attribute tags
+  const tags = a.tags && a.tags.length > 0 ? a.tags : null;
+
+  return `<article class="article">
+    ${metaHtml ? `<p class="article-meta">${metaHtml}</p>` : ""}
+    ${showTitle ? `<h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>` : ""}
+    ${stats ? `<p class="article-stats">${stats}</p>` : ""}
+    ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
+    ${tags ? `<p class="article-tags">${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</p>` : ""}
+    ${excerpt ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
+    ${metaHtml || showTitle ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${title}">🔗</a>` : ""}
+  </article>`;
 }
 
 function renderSourceContent(
@@ -964,6 +981,51 @@ export function renderHtml(
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+  }
+
+  /* ===== tag chips ===== */
+  .article-tags {
+    margin: 0.35rem 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 0.62rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.25rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--rule);
+    color: var(--muted);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    line-height: 1.5;
+  }
+
+  /* ===== source link style ===== */
+  .article-source-link {
+    color: var(--muted);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .article-source-link:hover {
+    color: var(--link);
+    text-decoration: underline;
+  }
+
+  /* ===== permalink icon ===== */
+  .article-permalink {
+    display: inline-block;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    text-decoration: none;
+    opacity: 0.5;
+    color: var(--muted);
+  }
+  .article-permalink:hover {
+    opacity: 1;
+    color: var(--link);
   }
 
   .empty {

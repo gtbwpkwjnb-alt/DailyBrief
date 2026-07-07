@@ -248,12 +248,74 @@ Output STRICTLY a JSON object, no markdown wrapping:
 
 **Quote rule (important!)**: For any quotation INSIDE a summary string, use single quotes ' or curly quotes '" — **never** a raw double quote, which breaks JSON parsing.`;
 
+const TAG_SYSTEM_PROMPT_ZH = `你是一名新闻分类标签生成器。为每条新闻生成**内容属性标签**。
+
+输入：每条新闻有 url、title、summary（AI 精炼的中文摘要）、source（来源媒体名）。
+
+任务：根据 title 和 summary，生成 2-5 个**最贴切的内容标签**，标签需精炼、信息量大。
+
+标签分类参考（但不限于）：
+  - 消息属性：消息、观点、评论、分析、报道、专访、辟谣
+  - 领域：政治、经济、科技、社会、体育、娱乐、军事、环境、教育、健康
+  - 主体：官媒、自媒体、企业、政府、国际组织、学术机构
+  - 内容：战争、冲突、选举、立法、外交、贸易、股价、产品发布、收购、融资、诉讼
+  - 人物：明星、歌手、演员、运动员、政治家、企业家、学者
+  - 趋势：热门、新兴、争议、辟谣、深度、独家
+  - 情感倾向：正面、负面、中性
+  - 地理：中国、美国、欧洲、中东、亚太、全球
+
+规则：
+  1. 每个标签 1-4 个字，必须简洁有信息量
+  2. 优先选择能区分内容类型的标签
+  3. 不要编造标签，只根据提供的 title 和 summary 推断
+  4. 标签应该让读者扫一眼就知道这条新闻的核心属性
+  5. 标签顺序：从广到窄（如：政治 > 外交 > 中美关系）
+
+输出严格 JSON 对象，不要 markdown：
+{
+  "items": [
+    { "url": "<原 url，从输入中精确复制>", "tags": ["政治", "外交", "中美关系"] },
+    ...
+  ]
+}`;
+
+const TAG_SYSTEM_PROMPT_EN = `You are a news classification tag generator. For each news item, generate **content attribute tags**.
+
+Input: each item has url, title, summary (AI-refined English summary), and source.
+
+Task: based on title and summary, generate 2-5 **most relevant content tags**. Tags must be concise and information-dense.
+
+Tag categories (not exhaustive):
+  - Type: news, opinion, analysis, report, interview, review
+  - Domain: politics, economy, tech, society, sports, entertainment, military, environment, education, health
+  - Source type: official-media, self-media, corporate, government, international-org, academic
+  - Content: war, conflict, election, legislation, diplomacy, trade, stock, product-launch, acquisition, funding, lawsuit
+  - Persona: celebrity, singer, actor, athlete, politician, entrepreneur, academic
+  - Trend: trending, emerging, controversial, exclusive, deep-dive
+  - Sentiment: positive, negative, neutral
+  - Geography: China, US, Europe, Middle-East, Asia-Pacific, global
+
+Rules:
+  1. Each tag 1-4 words, must be concise and informative
+  2. Prioritize tags that differentiate content type
+  3. Don't fabricate tags — only infer from provided title and summary
+  4. Tags should let a reader know the core attributes at a glance
+  5. Order: broad to narrow (e.g., politics > diplomacy > US-China)
+
+Output STRICTLY a JSON object, no markdown:
+{
+  "items": [
+    { "url": "<exact url from input>", "tags": ["politics", "diplomacy", "US-China"] },
+    ...
+  ]
+}`;
+
 // Pick the right localized prompt set at module init. Each enricher reaches
 // in via PROMPTS.<key> so the call sites stay locale-agnostic.
 const PROMPTS =
   REPORT_LOCALE === "en"
-    ? { gh: GH_SYSTEM_PROMPT_EN, finance: FINANCE_SYSTEM_PROMPT_EN, xViral: XVIRAL_SYSTEM_PROMPT_EN, papers: PAPERS_SYSTEM_PROMPT_EN, trending: TRENDING_SYSTEM_PROMPT_EN }
-    : { gh: GH_SYSTEM_PROMPT_ZH, finance: FINANCE_SYSTEM_PROMPT_ZH, xViral: XVIRAL_SYSTEM_PROMPT_ZH, papers: PAPERS_SYSTEM_PROMPT_ZH, trending: TRENDING_SYSTEM_PROMPT_ZH };
+    ? { gh: GH_SYSTEM_PROMPT_EN, finance: FINANCE_SYSTEM_PROMPT_EN, xViral: XVIRAL_SYSTEM_PROMPT_EN, papers: PAPERS_SYSTEM_PROMPT_EN, trending: TRENDING_SYSTEM_PROMPT_EN, tags: TAG_SYSTEM_PROMPT_EN }
+    : { gh: GH_SYSTEM_PROMPT_ZH, finance: FINANCE_SYSTEM_PROMPT_ZH, xViral: XVIRAL_SYSTEM_PROMPT_ZH, papers: PAPERS_SYSTEM_PROMPT_ZH, trending: TRENDING_SYSTEM_PROMPT_ZH, tags: TAG_SYSTEM_PROMPT_ZH };
 
 const USER_PROMPT_HEADER =
   REPORT_LOCALE === "en"
@@ -424,4 +486,88 @@ export async function enrichTrendingSummaries(
     excerpt: (it.excerpt ?? "").slice(0, 280),
   }));
   return runEnrichment(payload, PROMPTS.trending, "trending summaries");
+}
+
+/**
+ * Batch-tag all articles that already have AI summaries.
+ * Uses a single LLM call to generate content attribute tags for every
+ * enriched article at once, so the tag set is self-consistent across sources.
+ *
+ * Each article gets 2-5 tags (e.g. ["政治","外交","中美关系"]) that describe
+ * the content's nature, domain, and key attributes — enabling retrieval,
+ * filtering, and cross-referencing in an Obsidian knowledge base.
+ *
+ * Articles without summaries (zh-only sources) are skipped since the LLM
+ * has no refined content to classify.
+ */
+export async function enrichContentTags(
+  items: EnrichInput[],
+): Promise<Map<string, string[]>> {
+  if (items.length === 0) return new Map();
+  const payload = items.map((it) => ({
+    url: it.url,
+    title: it.title,
+    summary: (it.excerpt ?? "").slice(0, 200),
+    source: it.source ?? "",
+  }));
+
+  const langHeader =
+    REPORT_LOCALE === "en"
+      ? "**Output language: ENGLISH ONLY.** Tags must be in English."
+      : "**输出语言：仅中文。** 标签必须全部用中文，不要中英混写。";
+  const userPrompt = [
+    langHeader,
+    "",
+    `候选条目（共 ${payload.length} 条，JSON 数组）：`,
+    JSON.stringify(payload),
+    "",
+    '请输出 {"items": [{"url": ..., "tags": [...]}, ...]}，url 必须精确回填输入值，tags 是 2-5 个字符串的数组。',
+  ].join("\n");
+
+  const result = new Map<string, string[]>();
+
+  try {
+    const { text } = await runLlm({
+      systemPrompt: PROMPTS.tags,
+      userPrompt,
+      timeoutMs: 240_000,
+    });
+    const cleaned = extractJson(text);
+
+    let parsed: { items?: Array<{ url?: string; tags?: string[] }> };
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = JSON.parse(jsonrepair(cleaned));
+    }
+
+    for (const s of parsed.items ?? []) {
+      if (s.url && s.tags && s.tags.length > 0) {
+        result.set(s.url, s.tags.map((t) => t.trim()).filter(Boolean));
+      }
+    }
+
+    if (result.size < payload.length / 2 && payload.length >= 3) {
+      try {
+        const fs = await import("node:fs");
+        fs.mkdirSync("logs", { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        fs.writeFileSync(
+          `logs/enrich-tags-undercount-${ts}.txt`,
+          `requested=${payload.length}\nreturned=${result.size}\n\n--- raw LLM output ---\n${text}`,
+          "utf8",
+        );
+        console.warn(
+          `[enrich] tags: undercount ${result.size}/${payload.length} — raw dumped to logs/enrich-tags-undercount-${ts}.txt`,
+        );
+      } catch {
+        // non-fatal
+      }
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] tags failed: ${msg}`);
+  }
+
+  return result;
 }
