@@ -395,22 +395,22 @@ export function groupRaw(
         // natural feed order (which reflects editorial priority / heat),
         // rather than flattening by date. This ensures top stories from
         // each source get equal opportunity regardless of publish time.
-        const buckets: ArticleInput[][] = [];
-        for (const [id, b] of buckets[cat].entries()) {
-          if (subcatOf.get(id) === subId) buckets.push(b.items);
-        }
-        if (buckets.length === 0) continue;
-        const merged: ArticleInput[] = [];
-        let madeProgress = true;
-        while (merged.length < mergeLimit && madeProgress) {
-          madeProgress = false;
-          for (const b of buckets) {
-            if (b.length === 0) continue;
-            merged.push(b.shift()!);
-            madeProgress = true;
-            if (merged.length >= mergeLimit) break;
-          }
-        }
+	        const sourceBuckets: ArticleInput[][] = [];
+		        for (const [id, b] of buckets[cat].entries()) {
+	          if (subcatOf.get(id) === subId) sourceBuckets.push(b.items);
+	        }
+	        if (sourceBuckets.length === 0) continue;
+	        const merged: ArticleInput[] = [];
+	        let madeProgress = true;
+	        while (merged.length < mergeLimit && madeProgress) {
+	          madeProgress = false;
+	          for (const b of sourceBuckets) {
+	            if (b.length === 0) continue;
+	            merged.push(b.shift()!);
+	            madeProgress = true;
+	            if (merged.length >= mergeLimit) break;
+	          }
+	        }
         subs.push({
           id: subId,
           name: SUBCATEGORY_LABELS[subId] ?? subId,
@@ -418,7 +418,7 @@ export function groupRaw(
             {
               sourceId: "_merged",
               sourceName: SUBCATEGORY_LABELS[subId] ?? subId,
-              items: flat.slice(0, mergeLimit),
+	              items: merged.slice(0, mergeLimit),
               merged: true,
             },
           ],
