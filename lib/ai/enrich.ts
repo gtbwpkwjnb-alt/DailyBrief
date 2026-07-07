@@ -248,64 +248,48 @@ Output STRICTLY a JSON object, no markdown wrapping:
 
 **Quote rule (important!)**: For any quotation INSIDE a summary string, use single quotes ' or curly quotes '" — **never** a raw double quote, which breaks JSON parsing.`;
 
-const TAG_SYSTEM_PROMPT_ZH = `你是一名新闻分类标签生成器。为每条新闻生成**内容属性标签**。
+const TAG_SYSTEM_PROMPT_ZH = `你是一名新闻标签提炼师。为每条新闻生成**内容标签**。
 
 输入：每条新闻有 url、title、summary（AI 精炼的中文摘要）、source（来源媒体名）。
 
-任务：根据 title 和 summary，生成 2-5 个**最贴切的内容标签**，标签需精炼、信息量大。
+任务：根据 title 和 summary，生成 2-5 个**最能概括这条新闻核心属性的标签**。
 
-标签分类参考（但不限于）：
-  - 消息属性：消息、观点、评论、分析、报道、专访、辟谣
-  - 领域：政治、经济、科技、社会、体育、娱乐、军事、环境、教育、健康
-  - 主体：官媒、自媒体、企业、政府、国际组织、学术机构
-  - 内容：战争、冲突、选举、立法、外交、贸易、股价、产品发布、收购、融资、诉讼
-  - 人物：明星、歌手、演员、运动员、政治家、企业家、学者
-  - 趋势：热门、新兴、争议、辟谣、深度、独家
-  - 情感倾向：正面、负面、中性
-  - 地理：中国、美国、欧洲、中东、亚太、全球
-
-规则：
-  1. 每个标签 1-4 个字，必须简洁有信息量
-  2. 优先选择能区分内容类型的标签
-  3. 不要编造标签，只根据提供的 title 和 summary 推断
-  4. 标签应该让读者扫一眼就知道这条新闻的核心属性
-  5. 标签顺序：从广到窄（如：政治 > 外交 > 中美关系）
+要求：
+  - 标签必须从内容中自然提炼，不要套用固定分类
+  - 每个标签 1-6 个字，信息密度高
+  - 标签要能区分这条新闻和其他新闻的不同
+  - 好的标签示例：`中美关税` `5nm芯片` `美联储加息` `俄乌和谈` `GPT-5` `TikTok禁令` `世界杯` `票房黑马`
+  - 不要编造标签，只根据实际内容推断
+  - 标签顺序：从广到窄（如：AI > 大模型 > 开源模型）
+  - 不要 `，` 号，不要带空格，不要带引号
 
 输出严格 JSON 对象，不要 markdown：
 {
   "items": [
-    { "url": "<原 url，从输入中精确复制>", "tags": ["政治", "外交", "中美关系"] },
+    { "url": "<原 url，从输入中精确复制>", "tags": ["AI", "大模型", "开源"] },
     ...
   ]
 }`;
 
-const TAG_SYSTEM_PROMPT_EN = `You are a news classification tag generator. For each news item, generate **content attribute tags**.
+const TAG_SYSTEM_PROMPT_EN = `You are a news tag refiner. For each news item, generate **content tags**.
 
 Input: each item has url, title, summary (AI-refined English summary), and source.
 
-Task: based on title and summary, generate 2-5 **most relevant content tags**. Tags must be concise and information-dense.
+Task: based on title and summary, generate 2-5 **most representative tags** that capture the core attributes of the content.
 
-Tag categories (not exhaustive):
-  - Type: news, opinion, analysis, report, interview, review
-  - Domain: politics, economy, tech, society, sports, entertainment, military, environment, education, health
-  - Source type: official-media, self-media, corporate, government, international-org, academic
-  - Content: war, conflict, election, legislation, diplomacy, trade, stock, product-launch, acquisition, funding, lawsuit
-  - Persona: celebrity, singer, actor, athlete, politician, entrepreneur, academic
-  - Trend: trending, emerging, controversial, exclusive, deep-dive
-  - Sentiment: positive, negative, neutral
-  - Geography: China, US, Europe, Middle-East, Asia-Pacific, global
-
-Rules:
-  1. Each tag 1-4 words, must be concise and informative
-  2. Prioritize tags that differentiate content type
-  3. Don't fabricate tags — only infer from provided title and summary
-  4. Tags should let a reader know the core attributes at a glance
-  5. Order: broad to narrow (e.g., politics > diplomacy > US-China)
+Guidelines:
+  - Tags must emerge naturally from the content, not from a fixed taxonomy
+  - Each tag 1-4 words, high information density
+  - Tags should differentiate this item from others
+  - Good examples: US-China-tariffs, 5nm-chip, Fed-rate-hike, Ukraine-peace, GPT-5, TikTok-ban, World-Cup, blockbuster
+  - Don't fabricate tags — only infer from actual content
+  - Order: broad to narrow (e.g., AI > LLM > open-source)
+  - No commas, no spaces within tags, no quotes
 
 Output STRICTLY a JSON object, no markdown:
 {
   "items": [
-    { "url": "<exact url from input>", "tags": ["politics", "diplomacy", "US-China"] },
+    { "url": "<exact url from input>", "tags": ["AI", "LLM", "open-source"] },
     ...
   ]
 }`;

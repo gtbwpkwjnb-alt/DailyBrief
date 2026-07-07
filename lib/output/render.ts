@@ -575,6 +575,64 @@ function renderRawCategoryPanel(
   return `<nav class="sub-tabs">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
 }
 
+// ----- tag cloud -----
+
+interface TagEntry {
+  tag: string;
+  count: number;
+}
+
+/**
+ * Collect all tags across every article in the raw data, count frequency,
+ * and return sorted by count descending. Takes at most topN tags.
+ */
+function buildTagCloud(raw: RawByCategory, topN = 50): TagEntry[] {
+  const freq = new Map<string, number>();
+  for (const cat of Object.keys(raw) as Category[]) {
+    for (const sub of raw[cat]) {
+      for (const sg of sub.sources) {
+        for (const a of sg.items) {
+          if (a.tags && a.tags.length > 0) {
+            for (const t of a.tags) {
+              freq.set(t, (freq.get(t) ?? 0) + 1);
+            }
+          }
+        }
+      }
+    }
+  }
+  return Array.from(freq.entries())
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, topN);
+}
+
+/**
+ * Heat-level for a tag's popularity within the cloud.
+ * Top 10% → 3 (hottest), 10-25% → 2, 25-50% → 1, bottom 50% → 0 (cool).
+ */
+function heatLevel(index: number, total: number): number {
+  const pct = total > 1 ? index / (total - 1) : 0;
+  if (pct < 0.1) return 3;
+  if (pct < 0.25) return 2;
+  if (pct < 0.5) return 1;
+  return 0;
+}
+
+function renderTagCloud(tags: TagEntry[]): string {
+  if (tags.length === 0) return "";
+  const heading = REPORT_LOCALE === "en" ? "📊 Today's Hot Tags" : "📊 今日热点标签";
+  const heatColors = ["tag-heat-0", "tag-heat-1", "tag-heat-2", "tag-heat-3"];
+  const chips = tags.map((t, i) => {
+    const cls = heatColors[heatLevel(i, tags.length)];
+    return `<span class="tag-cloud-chip ${cls}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></span>`;
+  });
+  return `<section class="tag-cloud">
+    <p class="tag-cloud-heading">${heading}</p>
+    <div class="tag-cloud-body">${chips.join("")}</div>
+  </section>`;
+}
+
 // ----- top-level renderer -----
 
 export function renderHtml(
@@ -596,13 +654,14 @@ export function renderHtml(
       (n, sg) => n + sg.sources.reduce((m, s) => m + s.items.length, 0),
       0,
     );
-  const counts = {
-    trending: sumItems(raw.trending),
-    tech: sumItems(techMainSubs),
-    finance: sumItems(raw.finance),
-    politics: sumItems(raw.politics),
-    community: sumItems(techCommunitySubs),
-  };
+	  const counts = {
+	    trending: sumItems(raw.trending),
+	    tech: sumItems(techMainSubs),
+	    finance: sumItems(raw.finance),
+	    politics: sumItems(raw.politics),
+	    community: sumItems(techCommunitySubs),
+	  };
+	  const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
 
   return `<!doctype html>
 <html lang="${REPORT_LOCALE === "en" ? "en" : "zh-CN"}">
@@ -1028,14 +1087,86 @@ export function renderHtml(
     color: var(--link);
   }
 
-  .empty {
-    color: var(--muted);
-    text-align: center;
-    padding: 2rem 0;
-    font-size: 0.9rem;
-  }
+	  .empty {
+	    color: var(--muted);
+	    text-align: center;
+	    padding: 2rem 0;
+	    font-size: 0.9rem;
+	  }
 
-  /* ===== trading panel ===== */
+	  /* ===== tag cloud ===== */
+	  .tag-cloud {
+	    margin: 1rem 0 1.2rem;
+	    padding: 0.85rem 1rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-radius: 0.5rem;
+	  }
+	  .tag-cloud-heading {
+	    font-size: 0.72rem;
+	    font-weight: 600;
+	    text-transform: uppercase;
+	    letter-spacing: 0.08em;
+	    color: var(--muted);
+	    margin: 0 0 0.6rem;
+	  }
+	  .tag-cloud-body {
+	    display: flex;
+	    flex-wrap: wrap;
+	    gap: 0.4rem;
+	    align-items: center;
+	  }
+	  .tag-cloud-chip {
+	    display: inline-block;
+	    font-size: 0.72rem;
+	    padding: 0.15rem 0.55rem;
+	    border-radius: 1rem;
+	    font-weight: 500;
+	    letter-spacing: 0.02em;
+	    line-height: 1.6;
+	    transition: transform 0.15s ease, box-shadow 0.15s ease;
+	    cursor: default;
+	  }
+	  .tag-cloud-chip:hover {
+	    transform: translateY(-1px);
+	    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+	  }
+	  .tag-count {
+	    font-size: 0.6rem;
+	    margin-left: 0.2rem;
+	    opacity: 0.7;
+	    font-weight: 400;
+	  }
+	  /* Heat levels: cool → mild → warm → hot */
+	  .tag-heat-0 {
+	    background: rgba(99,102,241,0.10);
+	    color: var(--muted);
+	    border: 1px solid var(--rule);
+	  }
+	  .tag-heat-1 {
+	    background: rgba(16,185,129,0.12);
+	    color: #059669;
+	    border: 1px solid rgba(16,185,129,0.25);
+	  }
+	  .tag-heat-2 {
+	    background: rgba(245,158,11,0.14);
+	    color: #d97706;
+	    border: 1px solid rgba(245,158,11,0.3);
+	  }
+	  .tag-heat-3 {
+	    background: rgba(239,68,68,0.14);
+	    color: #dc2626;
+	    border: 1px solid rgba(239,68,68,0.3);
+	    font-weight: 600;
+	  }
+	  @media (prefers-color-scheme: dark) {
+	    .tag-heat-0 { color: var(--muted); }
+	    .tag-heat-1 { color: #6ee7b7; }
+	    .tag-heat-2 { color: #fcd34d; }
+	    .tag-heat-3 { color: #fca5a5; }
+	  }
+
+	  /* ===== trading panel ===== */
   .crypto-widgets {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -1293,9 +1424,11 @@ export function renderHtml(
     <span class="eyebrow">${STR.siteTitle}</span>
     <h1 class="report-title">${date}</h1>
     ${process.env.WEB_MODE === "true" ? `<a class="archive-link" href="../archive.html">${STR.archiveLink}</a>` : ""}
-  </header>
+	  </header>
 
-  <nav class="tabs" role="tablist">
+	  ${tagCloudHtml}
+
+	  <nav class="tabs" role="tablist">
     ${raw.trending.length > 0 ? `<button class="tab active" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
     <button class="tab${raw.trending.length > 0 ? "" : " active"}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
     ${trading ? `<button class="tab" data-tab="trading">${STR.catTrading}<span class="count">${trading.tickers.length}</span></button>` : ""}
