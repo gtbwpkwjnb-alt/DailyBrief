@@ -47,7 +47,7 @@ const TEXTS_ZH = {
   emptyGroup: "该组今日无数据。",
   footer: "内容均来自原媒体，本站仅作摘要整理与回链。",
   summaryLabelNews: "中文摘要",
-  summaryLabelIntro: "",
+  summaryLabelIntro: "中文摘要",
   tradingMarketOverview: "市场总览",
   tradingTodayFocus: "今日关注",
   tradingAllAssets: "全部资产",
