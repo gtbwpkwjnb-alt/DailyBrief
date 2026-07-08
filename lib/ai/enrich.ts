@@ -207,6 +207,49 @@ Output STRICTLY a JSON object, no markdown:
 
 **Quote rule (important!)**: For any quotation INSIDE a summary string, use single quotes ' or curly quotes '" — **never** a raw double quote, which breaks JSON parsing.`;
 
+const POLITICS_SYSTEM_PROMPT_ZH = `你是一名中文国际新闻编辑，为各国时政新闻生成**中文事实摘要**。
+
+输入：每条新闻有 url、title、excerpt 和 source（来源媒体名）。
+
+任务：根据 title + excerpt，生成一段 50-90 字的**中文摘要**：
+  - 原文是英文 → 翻译关键信息为中文，抽出事件要点
+  - 原文是中文 → 凝练为信息密度更高的中文
+  - 必须保留：人物/机构名、国家/地区、关键数字、条约/法令名称
+  - 清晰陈述事件核心：谁、什么行动、影响或后果
+  - 中性事实陈述，不带立场、不标题党
+  - 信息不足时宁可短，不要编造或扩展
+
+输出严格 JSON 对象，不要 markdown 包裹：
+{
+  "summaries": [
+    { "url": "<原 url，从输入中精确复制>", "summary": "<50-90 字中文摘要>" },
+    ...
+  ]
+}
+
+**引号规则（重要！）**：summary 内的引用一律用中文全角引号「」或""，**绝不**用英文双引号 \" —— 否则会导致 JSON 解析失败。`;
+
+const POLITICS_SYSTEM_PROMPT_EN = `You are an English-language international-news editor producing **factual summaries** of world politics.
+
+Input: each news item has url, title, excerpt, and source (publisher name).
+
+Task: from title + excerpt, write a 50-90 word **English summary** covering:
+  - Who, what action, what impact or consequence
+  - Preserve: people/organization names, countries/regions, key numbers, treaty/act names
+  - If the source text is non-English, translate the key information (not word-for-word)
+  - Neutral factual tone — no bias, no clickbait
+  - If info is insufficient, prefer shorter over fabrication
+
+Output STRICTLY a JSON object, no markdown wrapping:
+{
+  "summaries": [
+    { "url": "<exact url from input>", "summary": "<50-90 word English summary>" },
+    ...
+  ]
+}
+
+**Quote rule (important!)**: For any quotation INSIDE a summary string, use single quotes ' or curly quotes '" — **never** a raw double quote, which breaks JSON parsing.`;
+
 const TRENDING_SYSTEM_PROMPT_ZH = `你是一名中文编辑，负责将英文热搜关键词和帖子标题翻译为中文，并附上简短说明。
 
 输入：每条包含 url、title（英文关键词或标题）、excerpt（可能的说明文字）和 source（来源名称）。
@@ -260,7 +303,7 @@ const TAG_SYSTEM_PROMPT_ZH = `你是一名新闻标签提炼师。为每条新�
 要求：
   - 基础分类标签在前，内容精炼标签在后
   - 每个标签 1-6 个字
-  - 内容精炼标签示例：`中美关税` `5nm芯片` `美联储加息` `俄乌和谈` `GPT-5` `TikTok禁令` `世界杯` `票房黑马`
+  - 内容精炼标签示例：「中美关税」 「5nm芯片」 「美联储加息」 「俄乌和谈」 「GPT-5」 「TikTok禁令」 「世界杯」 「票房黑马」
   - 不要编造标签，只根据实际内容推断
   - 不要带空格，不要带引号
   - 标签顺序：从广到窄（如：科技 > AI > 开源模型）
@@ -302,8 +345,8 @@ Output STRICTLY a JSON object, no markdown:
 // in via PROMPTS.<key> so the call sites stay locale-agnostic.
 const PROMPTS =
   REPORT_LOCALE === "en"
-    ? { gh: GH_SYSTEM_PROMPT_EN, finance: FINANCE_SYSTEM_PROMPT_EN, xViral: XVIRAL_SYSTEM_PROMPT_EN, papers: PAPERS_SYSTEM_PROMPT_EN, trending: TRENDING_SYSTEM_PROMPT_EN, tags: TAG_SYSTEM_PROMPT_EN }
-    : { gh: GH_SYSTEM_PROMPT_ZH, finance: FINANCE_SYSTEM_PROMPT_ZH, xViral: XVIRAL_SYSTEM_PROMPT_ZH, papers: PAPERS_SYSTEM_PROMPT_ZH, trending: TRENDING_SYSTEM_PROMPT_ZH, tags: TAG_SYSTEM_PROMPT_ZH };
+    ? { gh: GH_SYSTEM_PROMPT_EN, finance: FINANCE_SYSTEM_PROMPT_EN, politics: POLITICS_SYSTEM_PROMPT_EN, xViral: XVIRAL_SYSTEM_PROMPT_EN, papers: PAPERS_SYSTEM_PROMPT_EN, trending: TRENDING_SYSTEM_PROMPT_EN, tags: TAG_SYSTEM_PROMPT_EN }
+    : { gh: GH_SYSTEM_PROMPT_ZH, finance: FINANCE_SYSTEM_PROMPT_ZH, politics: POLITICS_SYSTEM_PROMPT_ZH, xViral: XVIRAL_SYSTEM_PROMPT_ZH, papers: PAPERS_SYSTEM_PROMPT_ZH, trending: TRENDING_SYSTEM_PROMPT_ZH, tags: TAG_SYSTEM_PROMPT_ZH };
 
 const USER_PROMPT_HEADER =
   REPORT_LOCALE === "en"
@@ -474,6 +517,24 @@ export async function enrichTrendingSummaries(
     excerpt: (it.excerpt ?? "").slice(0, 280),
   }));
   return runEnrichment(payload, PROMPTS.trending, "trending summaries");
+}
+
+/**
+ * Generate Chinese summaries for politics/world-news items. Uses a dedicated
+ * politics prompt (rather than the finance prompt) so the LLM treats
+ * diplomatic, military, and geopolitical content with appropriate framing.
+ */
+export async function enrichPoliticsSummaries(
+  items: EnrichInput[],
+): Promise<Map<string, string>> {
+  if (items.length === 0) return new Map();
+  const payload = items.map((it) => ({
+    url: it.url,
+    title: it.title,
+    source: it.source ?? "",
+    excerpt: (it.excerpt ?? "").slice(0, 280),
+  }));
+  return runEnrichment(payload, PROMPTS.politics, "politics summaries");
 }
 
 /**

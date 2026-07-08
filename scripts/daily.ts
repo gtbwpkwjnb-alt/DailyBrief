@@ -13,6 +13,7 @@ import { getModelTag, validateBackendCredentials } from "../lib/ai/llm";
 import {
   enrichFinanceNewsSummaries,
   enrichGithubTrendingSummaries,
+  enrichPoliticsSummaries,
   enrichTrendingPapersSummaries,
   enrichTrendingSummaries,
   enrichXViralSummaries,
@@ -81,10 +82,11 @@ async function enrichFinanceNews(articles: ArticleInput[]): Promise<void> {
 
 async function enrichPolitics(articles: ArticleInput[]): Promise<void> {
   // Politics sources are split across subcategories (uk, us, france, japan,
-  // india, east-asia, other). Enrich each subcategory individually.
+  // india, east-asia, other). Enrich each subcategory individually using
+  // the politics-specific summarizer (instead of the finance default).
   const POLITICS_SUBS = ["uk", "us", "france", "japan", "india", "east-asia", "other"];
   for (const sub of POLITICS_SUBS) {
-    await enrichMergedSubgroup(articles, "politics", sub);
+    await enrichMergedSubgroup(articles, "politics", sub, enrichPoliticsSummaries);
   }
 }
 

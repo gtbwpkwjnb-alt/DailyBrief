@@ -862,50 +862,54 @@
     "enabled": true,
     "locales": ["zh", "en"]
   },
-  {
-    "id": "weibo-hot-search",
-    "name": "微博热搜",
-    "type": "rss",
-    "url": "https://rsshub.app/weibo/search/hot",
-    "category": "trending",
-    "subcategory": "cn-trending",
-    "lang": "zh",
-    "enabled": true,
-    "locales": ["zh"]
-  },
-  {
-    "id": "zhihu-hotlist",
-    "name": "知乎热榜",
-    "type": "rss",
-    "url": "https://rsshub.app/zhihu/hotlist",
-    "category": "trending",
-    "subcategory": "cn-trending",
-    "lang": "zh",
-    "enabled": true,
-    "locales": ["zh"]
-  },
-  {
-    "id": "baidu-hot-search",
-    "name": "百度热搜",
-    "type": "rss",
-    "url": "https://rsshub.app/baidu/top",
-    "category": "trending",
-    "subcategory": "cn-trending",
-    "lang": "zh",
-    "enabled": true,
-    "locales": ["zh"]
-  },
-  {
-    "id": "douyin-hot",
-    "name": "抖音热榜",
-    "type": "rss",
-    "url": "https://rsshub.app/douyin/hot",
-    "category": "trending",
-    "subcategory": "cn-trending",
-    "lang": "zh",
-    "enabled": true,
-    "locales": ["zh"]
-  },
+    {
+      "id": "weibo-hot-search",
+      "name": "微博热搜",
+      "type": "api",
+      "url": "https://weibo.com/ajax/side/hotSearch",
+      "category": "trending",
+      "subcategory": "cn-trending",
+      "lang": "zh",
+      "enabled": true,
+      "locales": ["zh"]
+    },
+    {
+      "id": "zhihu-hotlist",
+      "name": "知乎热榜",
+      "type": "rss",
+      "url": "https://rsshub.app/zhihu/hotlist",
+      "category": "trending",
+      "subcategory": "cn-trending",
+      "lang": "zh",
+      "enabled": true,
+      "useCurl": true,
+      "locales": ["zh"],
+      "notes": "通过 RSSHub 公共实例获取，可能因限流返回 0 条。建议自建 RSSHub 以获得稳定服务。"
+    },
+    {
+      "id": "baidu-hot-search",
+      "name": "百度热搜",
+      "type": "api",
+      "url": "https://top.baidu.com/api/board?tab=realtime",
+      "category": "trending",
+      "subcategory": "cn-trending",
+      "lang": "zh",
+      "enabled": true,
+      "locales": ["zh"]
+    },
+    {
+      "id": "douyin-hot",
+      "name": "抖音热榜",
+      "type": "rss",
+      "url": "https://rsshub.app/douyin/hot",
+      "category": "trending",
+      "subcategory": "cn-trending",
+      "lang": "zh",
+      "enabled": true,
+      "useCurl": true,
+      "locales": ["zh"],
+      "notes": "通过 RSSHub 公共实例获取，可能因限流返回 0 条。建议自建 RSSHub 以获得稳定服务。"
+    },
   {
     "id": "reddit-popular",
     "name": "Reddit 热门",
@@ -928,26 +932,26 @@
     "enabled": true,
     "locales": ["zh"]
   },
-  {
-    "id": "kr-36-hotlist",
-    "name": "36氪热榜",
-    "type": "rss",
-    "url": "https://rsshub.app/36kr/hot-list",
-    "category": "tech",
-    "subcategory": "cn-community",
-    "lang": "zh",
-    "enabled": true,
-    "locales": ["zh"]
-  },
-  {
-    "id": "bilibili-ranking",
-    "name": "B站排行榜",
-    "type": "rss",
-    "url": "https://rsshub.app/bilibili/ranking/0/3/1",
-    "category": "tech",
-    "subcategory": "cn-community",
-    "lang": "zh",
-    "enabled": true,
-    "locales": ["zh"]
-  }
+    {
+      "id": "kr-36-hotlist",
+      "name": "36氪热榜",
+      "type": "api",
+      "url": "https://36kr.com/hot-list",
+      "category": "tech",
+      "subcategory": "cn-community",
+      "lang": "zh",
+      "enabled": true,
+      "locales": ["zh"]
+    },
+    {
+      "id": "bilibili-ranking",
+      "name": "B站排行榜",
+      "type": "api",
+      "url": "https://api.bilibili.com/x/web-interface/ranking/v2",
+      "category": "tech",
+      "subcategory": "cn-community",
+      "lang": "zh",
+      "enabled": true,
+      "locales": ["zh"]
+    }
 ]
