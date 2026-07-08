@@ -36,17 +36,33 @@ import { todayKey } from "../lib/utils";
 
 const OUTPUT_DIR = "daily_reports";
 
-async function fetchAll(): Promise<ArticleInput[]> {
+/**
+ * Fetch all enabled sources with concurrency control.
+ * Serial fetching of 50+ sources means worst-case ~13 min (15s timeout × 54).
+ * Parallel batches of 10 cut that to ~2 min worst-case.
+ */
+async function fetchAll(batchSize = 10): Promise<ArticleInput[]> {
   const articles: ArticleInput[] = [];
   const enabled = sources.filter((s) => s.enabled !== false);
-  for (const source of enabled) {
-    try {
-      const items = await fetchSource(source);
-      console.log(`  ${source.id.padEnd(20)} ${items.length}`);
-      articles.push(...items.map((it) => ({ ...it, source: source.name })));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`  ${source.id.padEnd(20)} FAILED — ${msg}`);
+  for (let i = 0; i < enabled.length; i += batchSize) {
+    const batch = enabled.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(async (source) => {
+        const items = await fetchSource(source);
+        return { source, items };
+      }),
+    );
+    for (const res of results) {
+      if (res.status === "fulfilled") {
+        const { source, items } = res.value;
+        console.log(`  ${source.id.padEnd(20)} ${items.length}`);
+        articles.push(...items.map((it) => ({ ...it, source: source.name })));
+      } else {
+        const reason = res.reason instanceof Error ? res.reason.message : String(res.reason);
+        const failedIdx = results.indexOf(res);
+        const failedSource = batch[failedIdx];
+        console.error(`  ${failedSource?.id.padEnd(20) ?? "?"} FAILED — ${reason}`);
+      }
     }
   }
   return articles;
