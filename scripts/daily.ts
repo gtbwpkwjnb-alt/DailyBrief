@@ -41,7 +41,7 @@ const OUTPUT_DIR = "daily_reports";
  * Serial fetching of 50+ sources means worst-case ~13 min (15s timeout × 54).
  * Parallel batches of 10 cut that to ~2 min worst-case.
  */
-async function fetchAll(batchSize = 10): Promise<ArticleInput[]> {
+async function fetchAll(batchSize = 5): Promise<ArticleInput[]> {
   const articles: ArticleInput[] = [];
   const enabled = sources.filter((s) => s.enabled !== false);
   for (let i = 0; i < enabled.length; i += batchSize) {
@@ -97,13 +97,52 @@ async function enrichFinanceNews(articles: ArticleInput[]): Promise<void> {
 }
 
 async function enrichPolitics(articles: ArticleInput[]): Promise<void> {
-  // Politics sources are split across subcategories (uk, us, france, japan,
-  // india, east-asia, other). Enrich each subcategory individually using
-  // the politics-specific summarizer (instead of the finance default).
+  // Collect articles from all politics subcategories, do round-robin per subcat,
+  // then send them ALL to a single LLM call instead of 7 separate calls.
   const POLITICS_SUBS = ["uk", "us", "france", "japan", "india", "east-asia", "other"];
+  const toEnrich: ArticleInput[] = [];
   for (const sub of POLITICS_SUBS) {
-    await enrichMergedSubgroup(articles, "politics", sub, enrichPoliticsSummaries);
+    const subSources = sources.filter(
+      (s) => s.category === "politics" && s.subcategory === sub && s.enabled !== false,
+    );
+    const enabledIds = new Set(subSources.map((s) => s.id));
+    const sameLocaleIds = new Set(
+      subSources.filter((s) => (s.lang ?? "en") === REPORT_LOCALE).map((s) => s.id),
+    );
+    const limit = MERGED_SUBGROUP_LIMITS[`politics:${sub}`] ?? 15;
+    const candidates = articles
+      .filter((a) => enabledIds.has(a.sourceId))
+      .filter((a) => !isSportsArticle(a.title));
+    const bySource = new Map<string, ArticleInput[]>();
+    for (const a of candidates) {
+      const arr = bySource.get(a.sourceId) ?? [];
+      arr.push(a);
+      bySource.set(a.sourceId, arr);
+    }
+    const buckets = Array.from(bySource.values());
+    const top: ArticleInput[] = [];
+    let madeProgress = true;
+    while (top.length < limit && madeProgress) {
+      madeProgress = false;
+      for (const b of buckets) {
+        if (b.length === 0) continue;
+        top.push(b.shift()!);
+        madeProgress = true;
+        if (top.length >= limit) break;
+      }
+    }
+    toEnrich.push(...top.filter((a) => !sameLocaleIds.has(a.sourceId)));
   }
+  if (toEnrich.length === 0) return;
+  console.log(`[daily] enriching ${toEnrich.length} politics items with ${REPORT_LOCALE} summaries…`);
+  const t0 = Date.now();
+  const summaries = await enrichPoliticsSummaries(toEnrich);
+  let matched = 0;
+  for (const a of toEnrich) {
+    const s = summaries.get(a.url);
+    if (s) { a.summary = s; matched++; }
+  }
+  console.log(`[daily] politics enrichment done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${matched}/${toEnrich.length}`);
 }
 
 async function enrichAiNews(articles: ArticleInput[]): Promise<void> {
