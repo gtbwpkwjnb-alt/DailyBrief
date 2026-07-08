@@ -38,7 +38,7 @@ on:
     # absent from gh-pages.
     - cron: '7 * * * *'
     - cron: '37 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: write  # needed to push to gh-pages branch
