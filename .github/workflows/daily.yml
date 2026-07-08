@@ -26,11 +26,7 @@ name: Daily Brief
 # the current hour in REPORT_TZ against REPORT_HOUR and only allows the build
 # job to run when they match. workflow_dispatch always bypasses the gate.
 
-on:
-  schedule:
-    - cron: "7 * * * *"
-    - cron: "37 * * * *"
-  workflow_dispatch:
+on: workflow_dispatch
 
 permissions:
   contents: write  # needed to push to gh-pages branch
