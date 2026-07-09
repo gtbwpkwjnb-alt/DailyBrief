@@ -563,8 +563,10 @@ async function main() {
     { key: "finance",  label: "财经要点", filter: (a: ArticleInput) => a.category === "finance" },
     { key: "politics", label: "国际时政", filter: (a: ArticleInput) => a.category === "politics" },
   ];
-  // Limit per category to avoid LLM token overflow (most categories have ~100-300 items)
-  const CATEGORY_ITEM_LIMIT = 80;
+  // Limit per category — keeping within LLM token limits.
+  // The old pipeline enriched ~15-50 items per category across many calls;
+  // consolidated calls need smaller batches for reasonable latency.
+  const CATEGORY_ITEM_LIMIT = 40;
   await Promise.allSettled(CATEGORY_CONFIG.map(async (cfg) => {
     const items = articles.filter(cfg.filter).slice(0, CATEGORY_ITEM_LIMIT);
     if (items.length === 0) return;
