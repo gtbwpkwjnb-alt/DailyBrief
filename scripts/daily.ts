@@ -524,6 +524,30 @@ async function main() {
     throw new Error("no articles fetched — aborting");
   }
 
+  // Global dedup: remove duplicate articles across all sources (and across
+  // categories). Two passes:
+  //   1. URL dedup — exact URL match, always safe.
+  //   2. Title dedup — normalized title match, keeps first occurrence.
+  // Priority order follows registry order (first-registered source wins).
+  {
+    const seenUrl = new Set<string>();
+    const seenTitle = new Set<string>();
+    const deduped: typeof articles = [];
+    for (const a of articles) {
+      const urlKey = a.url.toLowerCase().trim();
+      if (seenUrl.has(urlKey)) continue;
+      seenUrl.add(urlKey);
+      const titleKey = a.title.toLowerCase().replace(/[^\w\u4e00-\u9fff]/g, "").trim();
+      if (titleKey.length > 10 && seenTitle.has(titleKey)) continue;
+      if (titleKey.length > 10) seenTitle.add(titleKey);
+      deduped.push(a);
+    }
+    const removed = articles.length - deduped.length;
+    if (removed > 0) console.log(`[daily] global dedup removed ${removed} duplicates (${articles.length} → ${deduped.length})`);
+    articles.length = 0;
+    articles.push(...deduped);
+  }
+
   // Enrich in two parallel batches to cut total wall-clock time.
   //
   // Batch 1 (independent, ~5 concurrent LLM calls):
