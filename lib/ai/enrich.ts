@@ -357,6 +357,69 @@ const USER_PROMPT_FOOTER =
     ? `Output \`{"summaries": [{"url": ..., "summary": ...}, ...]}\` — url must be copied exactly from input.`
     : `请输出 {"summaries": [{"url": ..., "summary": ...}, ...]}，url 必须精确回填输入值。`;
 
+/**
+ * Enrichment timeout — lowered from 240s to 80s because most enrich calls
+ * complete in 30-60s. The 240s budget was a major contributor to total
+ * pipeline time when multiple enrichments ran serially.
+ */
+const ENRICH_TIMEOUT_MS = 80_000;
+
+/**
+ * Run a single enrichment LLM call with 1 retry and exponential back-off.
+ * First attempt: timeout = ENRICH_TIMEOUT_MS. On failure, retry once after
+ * 10s delay (to let transient provider errors clear).
+ */
+async function runEnrichmentOnce(
+  payload: unknown[],
+  systemPrompt: string,
+  userPrompt: string,
+  scope: string,
+  timeoutMs: number,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+
+  const { text } = await runLlm({
+    systemPrompt,
+    userPrompt,
+    timeoutMs,
+  });
+  const cleaned = extractJson(text);
+
+  let parsed: { summaries?: Array<{ url?: string; summary?: string }> };
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    parsed = JSON.parse(jsonrepair(cleaned));
+  }
+
+  for (const s of parsed.summaries ?? []) {
+    if (s.url && s.summary) result.set(s.url, s.summary.trim());
+  }
+
+  // Diagnostic: if we got back substantially fewer entries than asked for,
+  // dump the raw LLM output so the cause is visible without re-running.
+  if (result.size < payload.length / 2 && payload.length >= 3) {
+    try {
+      const fs = await import("node:fs");
+      fs.mkdirSync("logs", { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const tag = scope.replace(/[^a-z0-9]/gi, "-");
+      fs.writeFileSync(
+        `logs/enrich-undercount-${tag}-${ts}.txt`,
+        `scope=${scope}\nrequested=${payload.length}\nreturned=${result.size}\n\n--- raw LLM output ---\n${text}`,
+        "utf8",
+      );
+      console.warn(
+        `[enrich] ${scope}: undercount ${result.size}/${payload.length} — raw dumped to logs/enrich-undercount-${tag}-${ts}.txt`,
+      );
+    } catch {
+      // Can't write log (read-only fs?) — non-fatal, just skip.
+    }
+  }
+
+  return result;
+}
+
 async function runEnrichment(
   payload: unknown[],
   systemPrompt: string,
@@ -379,56 +442,24 @@ async function runEnrichment(
     USER_PROMPT_FOOTER,
   ].join("\n");
 
-  const result = new Map<string, string>();
-
+  // Attempt 1
   try {
-    const { text } = await runLlm({
-      systemPrompt,
-      userPrompt,
-      timeoutMs: 240_000,
-    });
-    const cleaned = extractJson(text);
-
-    let parsed: { summaries?: Array<{ url?: string; summary?: string }> };
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      parsed = JSON.parse(jsonrepair(cleaned));
-    }
-
-    for (const s of parsed.summaries ?? []) {
-      if (s.url && s.summary) result.set(s.url, s.summary.trim());
-    }
-
-    // Diagnostic: if we got back substantially fewer entries than asked for,
-    // dump the raw LLM output so the cause is visible without re-running.
-    // Common reasons: provider max_tokens too low → truncated JSON, model
-    // refused some items, URL field altered so the upstream URL-match drops
-    // entries downstream. Without this dump the failure is silent.
-    if (result.size < payload.length / 2 && payload.length >= 3) {
-      try {
-        const fs = await import("node:fs");
-        fs.mkdirSync("logs", { recursive: true });
-        const ts = new Date().toISOString().replace(/[:.]/g, "-");
-        const tag = scope.replace(/[^a-z0-9]/gi, "-");
-        fs.writeFileSync(
-          `logs/enrich-undercount-${tag}-${ts}.txt`,
-          `scope=${scope}\nrequested=${payload.length}\nreturned=${result.size}\n\n--- raw LLM output ---\n${text}`,
-          "utf8",
-        );
-        console.warn(
-          `[enrich] ${scope}: undercount ${result.size}/${payload.length} — raw dumped to logs/enrich-undercount-${tag}-${ts}.txt`,
-        );
-      } catch {
-        // Can't write log (read-only fs?) — non-fatal, just skip.
-      }
-    }
+    return await runEnrichmentOnce(payload, systemPrompt, userPrompt, scope, ENRICH_TIMEOUT_MS);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[enrich] ${scope} failed: ${msg}`);
+    console.warn(`[enrich] ${scope} attempt 1 failed: ${msg} — retrying in 10s…`);
   }
 
-  return result;
+  // Retry after 10s back-off
+  await new Promise((r) => setTimeout(r, 10_000));
+  try {
+    return await runEnrichmentOnce(payload, systemPrompt, userPrompt, scope, ENRICH_TIMEOUT_MS);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] ${scope} attempt 2 also failed: ${msg}`);
+  }
+
+  return new Map();
 }
 
 /**
@@ -575,11 +606,12 @@ export async function enrichContentTags(
 
   const result = new Map<string, string[]>();
 
+  // Attempt 1
   try {
     const { text } = await runLlm({
       systemPrompt: PROMPTS.tags,
       userPrompt,
-      timeoutMs: 240_000,
+      timeoutMs: ENRICH_TIMEOUT_MS,
     });
     const cleaned = extractJson(text);
 
@@ -613,9 +645,40 @@ export async function enrichContentTags(
         // non-fatal
       }
     }
+
+    return result;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[enrich] tags failed: ${msg}`);
+    console.warn(`[enrich] tags attempt 1 failed: ${msg} — retrying in 10s…`);
+  }
+
+  // Retry after 10s back-off
+  await new Promise((r) => setTimeout(r, 10_000));
+  try {
+    const { text } = await runLlm({
+      systemPrompt: PROMPTS.tags,
+      userPrompt,
+      timeoutMs: ENRICH_TIMEOUT_MS,
+    });
+    const cleaned = extractJson(text);
+
+    let parsed: { items?: Array<{ url?: string; tags?: string[] }> };
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = JSON.parse(jsonrepair(cleaned));
+    }
+
+    for (const s of parsed.items ?? []) {
+      if (s.url && s.tags && s.tags.length > 0) {
+        result.set(s.url, s.tags.map((t) => t.trim()).filter(Boolean));
+      }
+    }
+
+    return result;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] tags attempt 2 also failed: ${msg}`);
   }
 
   return result;

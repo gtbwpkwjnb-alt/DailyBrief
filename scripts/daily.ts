@@ -35,14 +35,73 @@ import type { TradingSection } from "../lib/ai/pipeline";
 import { todayKey } from "../lib/utils";
 
 const OUTPUT_DIR = "daily_reports";
+const CACHE_DIR = ".cache";
+
+/**
+ * Enrichment cache: after each enrich step succeeds, its results are saved
+ * to .cache/<date>/<scope>.json. On re-runs the same day, cached results are
+ * loaded instead of calling the LLM again. This turns a 3-minute re-run into
+ * ~5 seconds when only a few sources changed.
+ */
+
+function cachePath(scope: string, date: string): string {
+  return path.join(CACHE_DIR, date, `${scope}.json`);
+}
+
+function readEnrichCache(scope: string, date: string): Map<string, string> | null {
+  const p = cachePath(scope, date);
+  try {
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, "utf8")) as Array<[string, string]>;
+      return new Map(data);
+    }
+  } catch {
+    // corrupted cache — skip
+  }
+  return null;
+}
+
+function writeEnrichCache(scope: string, date: string, map: Map<string, string>): void {
+  try {
+    const dir = path.dirname(cachePath(scope, date));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(cachePath(scope, date), JSON.stringify([...map.entries()]), "utf8");
+  } catch {
+    // can't write cache (read-only fs?) — non-fatal
+  }
+}
+
+function readTagCache(date: string): Map<string, string[]> | null {
+  const p = cachePath("tags", date);
+  try {
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, "utf8")) as Array<[string, string[]]>;
+      return new Map(data);
+    }
+  } catch {
+    // corrupted cache — skip
+  }
+  return null;
+}
+
+function writeTagCache(date: string, map: Map<string, string[]>): void {
+  try {
+    const dir = path.dirname(cachePath("tags", date));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(cachePath("tags", date), JSON.stringify([...map.entries()]), "utf8");
+  } catch {
+    // can't write cache — non-fatal
+  }
+}
 
 /**
  * Fetch all enabled sources with concurrency control.
  * Serial fetching of 50+ sources means worst-case ~13 min (15s timeout × 54).
  * Parallel batches of 10 cut that to ~2 min worst-case.
  */
-async function fetchAll(batchSize = 5): Promise<ArticleInput[]> {
+async function fetchAll(batchSize = 5): Promise<{ articles: ArticleInput[]; failedSources: Array<{ id: string; name: string; reason: string }> }> {
   const articles: ArticleInput[] = [];
+  const failedSources: Array<{ id: string; name: string; reason: string }> = [];
   const enabled = sources.filter((s) => s.enabled !== false);
   for (let i = 0; i < enabled.length; i += batchSize) {
     const batch = enabled.slice(i, i + batchSize);
@@ -61,16 +120,26 @@ async function fetchAll(batchSize = 5): Promise<ArticleInput[]> {
         const reason = res.reason instanceof Error ? res.reason.message : String(res.reason);
         const failedIdx = results.indexOf(res);
         const failedSource = batch[failedIdx];
-        console.error(`  ${failedSource?.id.padEnd(20) ?? "?"} FAILED — ${reason}`);
+        const id = failedSource?.id ?? "unknown";
+        console.error(`  ${id.padEnd(20)} FAILED — ${reason}`);
+        failedSources.push({ id, name: failedSource?.name ?? id, reason });
       }
     }
   }
-  return articles;
+  return { articles, failedSources };
 }
 
-async function enrichGhTrending(articles: ArticleInput[]): Promise<void> {
+async function enrichGhTrending(articles: ArticleInput[], date: string): Promise<void> {
   const gh = articles.filter((a) => a.sourceId === "github-trending");
   if (gh.length === 0) return;
+  // Check cache first
+  const cached = readEnrichCache("gh-trending", date);
+  if (cached) {
+    let hit = 0;
+    for (const a of gh) { const s = cached.get(a.url); if (s) { a.summary = s; hit++; } }
+    console.log(`[daily] GH Trending: cache hit ${hit}/${gh.length}`);
+    return;
+  }
   console.log(
     `[daily] enriching ${gh.length} GitHub Trending repos with ${REPORT_LOCALE} summaries…`,
   );
@@ -83,6 +152,7 @@ async function enrichGhTrending(articles: ArticleInput[]): Promise<void> {
   console.log(
     `[daily] enrichment done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${summaries.size}/${gh.length}`,
   );
+  if (summaries.size > 0) writeEnrichCache("gh-trending", date, summaries);
 }
 
 /**
@@ -92,11 +162,11 @@ async function enrichGhTrending(articles: ArticleInput[]): Promise<void> {
  * publishedAt desc, slice to the merge limit, ask Sonnet for Chinese
  * factual summaries.
  */
-async function enrichFinanceNews(articles: ArticleInput[]): Promise<void> {
-  await enrichMergedSubgroup(articles, "finance", "news");
+async function enrichFinanceNews(articles: ArticleInput[], date: string): Promise<void> {
+  await enrichMergedSubgroup(articles, "finance", "news", undefined, date);
 }
 
-async function enrichPolitics(articles: ArticleInput[]): Promise<void> {
+async function enrichPolitics(articles: ArticleInput[], date: string): Promise<void> {
   // Collect articles from all politics subcategories, do round-robin per subcat,
   // then send them ALL to a single LLM call instead of 7 separate calls.
   const POLITICS_SUBS = ["uk", "us", "france", "japan", "india", "east-asia", "other"];
@@ -134,6 +204,14 @@ async function enrichPolitics(articles: ArticleInput[]): Promise<void> {
     toEnrich.push(...top.filter((a) => !sameLocaleIds.has(a.sourceId)));
   }
   if (toEnrich.length === 0) return;
+  // Check cache first
+  const cachedPolitics = readEnrichCache("politics", date);
+  if (cachedPolitics) {
+    let hit = 0;
+    for (const a of toEnrich) { const s = cachedPolitics.get(a.url); if (s) { a.summary = s; hit++; } }
+    console.log(`[daily] Politics: cache hit ${hit}/${toEnrich.length}`);
+    return;
+  }
   console.log(`[daily] enriching ${toEnrich.length} politics items with ${REPORT_LOCALE} summaries…`);
   const t0 = Date.now();
   const summaries = await enrichPoliticsSummaries(toEnrich);
@@ -143,10 +221,11 @@ async function enrichPolitics(articles: ArticleInput[]): Promise<void> {
     if (s) { a.summary = s; matched++; }
   }
   console.log(`[daily] politics enrichment done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${matched}/${toEnrich.length}`);
+  if (summaries.size > 0) writeEnrichCache("politics", date, summaries);
 }
 
-async function enrichAiNews(articles: ArticleInput[]): Promise<void> {
-  await enrichMergedSubgroup(articles, "tech", "ai-news");
+async function enrichAiNews(articles: ArticleInput[], date: string): Promise<void> {
+  await enrichMergedSubgroup(articles, "tech", "ai-news", undefined, date);
 }
 
 /**
@@ -155,11 +234,11 @@ async function enrichAiNews(articles: ArticleInput[]): Promise<void> {
  * for google-trends and reddit-trending, plus cn-trending sources are
  * already in Chinese and skipped.
  */
-async function enrichTrending(articles: ArticleInput[]): Promise<void> {
+async function enrichTrending(articles: ArticleInput[], date: string): Promise<void> {
   // Enrich Google Trends (English keywords → Chinese)
-  await enrichMergedSubgroup(articles, "trending", "google-trends", enrichTrendingSummaries);
+  await enrichMergedSubgroup(articles, "trending", "google-trends", enrichTrendingSummaries, date);
   // Enrich Reddit popular (English titles → Chinese)
-  await enrichMergedSubgroup(articles, "trending", "reddit-trending", enrichTrendingSummaries);
+  await enrichMergedSubgroup(articles, "trending", "reddit-trending", enrichTrendingSummaries, date);
   // cn-trending sources (微博热搜, 知乎热榜) are already in Chinese — no enrichment needed
 }
 
@@ -171,11 +250,19 @@ async function enrichTrending(articles: ArticleInput[]): Promise<void> {
  * The Sonnet prompt also differs (XVIRAL_SYSTEM_PROMPT in enrich.ts) — X
  * tweet titles are clickbait, the previewText holds the actual claim.
  */
-async function enrichXViral(articles: ArticleInput[]): Promise<void> {
+async function enrichXViral(articles: ArticleInput[], date: string): Promise<void> {
   const xPosts = articles
     .filter((a) => a.sourceId === "attentionvc-ai")
     .slice(0, 20);
   if (xPosts.length === 0) return;
+  // Check cache first
+  const cachedX = readEnrichCache("x-viral", date);
+  if (cachedX) {
+    let hit = 0;
+    for (const a of xPosts) { const s = cachedX.get(a.url); if (s) { a.summary = s; hit++; } }
+    console.log(`[daily] X Viral: cache hit ${hit}/${xPosts.length}`);
+    return;
+  }
   console.log(`[daily] enriching ${xPosts.length} X posts with ${REPORT_LOCALE} summaries…`);
   const t0 = Date.now();
   // Author handle is encoded in the URL (https://x.com/{handle}/status/{id})
@@ -195,6 +282,7 @@ async function enrichXViral(articles: ArticleInput[]): Promise<void> {
   console.log(
     `[daily] enrichment done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${summaries.size}/${xPosts.length}`,
   );
+  if (summaries.size > 0) writeEnrichCache("x-viral", date, summaries);
 }
 
 /**
@@ -202,11 +290,18 @@ async function enrichXViral(articles: ArticleInput[]): Promise<void> {
  * (huggingface-papers is in PRESERVE_FETCH_ORDER_SOURCES) and caps to the
  * displayed limit (matches SOURCE_DISPLAY_LIMITS["tech:trending-papers"]).
  */
-async function enrichTrendingPapers(articles: ArticleInput[]): Promise<void> {
+async function enrichTrendingPapers(articles: ArticleInput[], date: string): Promise<void> {
   const papers = articles
     .filter((a) => a.sourceId === "huggingface-papers")
     .slice(0, 20);
   if (papers.length === 0) return;
+  const cached = readEnrichCache("trending-papers", date);
+  if (cached) {
+    let hit = 0;
+    for (const a of papers) { const s = cached.get(a.url); if (s) { a.summary = s; hit++; } }
+    console.log(`[daily] Trending Papers: cache hit ${hit}/${papers.length}`);
+    return;
+  }
   console.log(
     `[daily] enriching ${papers.length} trending papers with ${REPORT_LOCALE} summaries…`,
   );
@@ -221,6 +316,7 @@ async function enrichTrendingPapers(articles: ArticleInput[]): Promise<void> {
   console.log(
     `[daily] enrichment done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${summaries.size}/${papers.length}`,
   );
+  if (summaries.size > 0) writeEnrichCache("trending-papers", date, summaries);
 }
 
 /**
@@ -228,10 +324,21 @@ async function enrichTrendingPapers(articles: ArticleInput[]): Promise<void> {
  * Runs once after all summary enrichments complete, sending every article
  * that has a summary in a single batch LLM call.
  */
-async function enrichTags(articles: ArticleInput[]): Promise<void> {
+async function enrichTags(articles: ArticleInput[], date: string): Promise<void> {
   // Only tag articles that have a summary (skips zh-only sources)
   const toTag = articles.filter((a) => a.summary);
   if (toTag.length === 0) return;
+  // Check tag cache first
+  const cached = readTagCache(date);
+  if (cached) {
+    let hit = 0;
+    for (const a of toTag) {
+      const t = cached.get(a.url);
+      if (t && t.length > 0) { a.tags = t; hit++; }
+    }
+    console.log(`[daily] tags: cache hit ${hit}/${toTag.length}`);
+    return;
+  }
   console.log(
     `[daily] tagging ${toTag.length} articles with content attributes…`,
   );
@@ -255,6 +362,7 @@ async function enrichTags(articles: ArticleInput[]): Promise<void> {
   console.log(
     `[daily] tagging done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${matched}/${toTag.length}`,
   );
+  if (tags.size > 0) writeTagCache(date, tags);
 }
 
 /**
@@ -273,6 +381,7 @@ async function enrichMergedSubgroup(
   category: "tech" | "finance" | "politics" | "trending",
   subcategory: string,
   summarizer?: (items: EnrichInput[]) => Promise<Map<string, string>>,
+  date?: string,
 ): Promise<void> {
   const subSources = sources.filter(
     (s) =>
@@ -312,6 +421,17 @@ async function enrichMergedSubgroup(
   }
   const toEnrich = top.filter((a) => !sameLocaleIds.has(a.sourceId));
   if (toEnrich.length === 0) return;
+  // Check cache if date provided
+  const cacheScope = `${category}-${subcategory}`;
+  if (date) {
+    const cached = readEnrichCache(cacheScope, date);
+    if (cached) {
+      let hit = 0;
+      for (const a of toEnrich) { const s = cached.get(a.url); if (s) { a.summary = s; hit++; } }
+      console.log(`[daily] ${cacheScope}: cache hit ${hit}/${toEnrich.length}`);
+      return;
+    }
+  }
   console.log(
     `[daily] enriching ${toEnrich.length}/${top.length} ${category}:${subcategory} items with ${REPORT_LOCALE} summaries…`,
   );
@@ -325,6 +445,7 @@ async function enrichMergedSubgroup(
   console.log(
     `[daily] enrichment done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${summaries.size}/${toEnrich.length}`,
   );
+  if (summaries.size > 0 && date) writeEnrichCache(cacheScope, date, summaries);
 }
 
 /**
@@ -374,21 +495,41 @@ async function main() {
 
   const date = todayKey();
   console.log(`[daily] ${date} — fetching sources…\n`);
-  const articles = await fetchAll();
-  console.log(`\n[daily] total articles: ${articles.length}`);
+  const { articles, failedSources } = await fetchAll();
+  console.log(`\n[daily] total articles: ${articles.length}, failed sources: ${failedSources.length}`);
   if (articles.length === 0) {
     throw new Error("no articles fetched — aborting");
   }
 
-  // Enrich GH Trending, papers, finance news, and politics with summaries.
-  await enrichGhTrending(articles);
-  await enrichTrendingPapers(articles);
-  await enrichFinanceNews(articles);
-  await enrichPolitics(articles);
-  await enrichAiNews(articles);
-  await enrichTrending(articles);
-  await enrichXViral(articles);
-  await enrichTags(articles);
+  // Enrich in two parallel batches to cut total wall-clock time.
+  //
+  // Batch 1 (independent, ~5 concurrent LLM calls):
+  //   GH Trending, Papers, Finance, Politics, AI News
+  // Batch 2 (depends on batch 1 for tag coverage):
+  //   Trending (Google Trends + Reddit), X Viral, Tags
+  //
+  // Previously these ran serially (8 calls × up to 80s each = 640s worst-case).
+  // Now batch 1 takes ~80s, batch 2 takes ~80s → ~160s total.
+  console.log(`[daily] enriching batch 1 (GH + Papers + Finance + Politics + AI News)…`);
+  const enrichT0 = Date.now();
+  await Promise.allSettled([
+    enrichGhTrending(articles, date),
+    enrichTrendingPapers(articles, date),
+    enrichFinanceNews(articles, date),
+    enrichPolitics(articles, date),
+    enrichAiNews(articles, date),
+  ]);
+  console.log(`[daily] batch 1 done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
+
+  console.log(`[daily] enriching batch 2 (Trending + XViral + Tags)…`);
+  const enrichT1 = Date.now();
+  await Promise.allSettled([
+    enrichTrending(articles, date),
+    enrichXViral(articles, date),
+    enrichTags(articles, date),
+  ]);
+  console.log(`[daily] batch 2 done in ${((Date.now() - enrichT1) / 1000).toFixed(1)}s`);
+  console.log(`[daily] all enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
   // Trading signals: Yahoo fetch + indicators + commentary. Non-fatal —
   // if it errors, we still ship the news digest.
@@ -416,10 +557,10 @@ async function main() {
   // re-fetching or re-calling the LLM.
   fs.writeFileSync(
     `${base}-articles.json`,
-    JSON.stringify({ date, articles }, null, 2),
+    JSON.stringify({ date, articles, failedSources }, null, 2),
     "utf8",
   );
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[daily] wrote ${base}.{json,html,md,articles.json}`);

@@ -151,9 +151,13 @@ async function callOnce(userPayloadJson: string): Promise<DailyReport> {
           "候选新闻（JSON 数组，共 " + userPayloadJson.length + " 字符）：",
           userPayloadJson,
         ].join("\n");
+  // Digest gets a longer timeout (180s) than enrichment (80s) because it
+  // produces a larger, more structured output that the model needs more time
+  // to reason about.
   const { text } = await runLlm({
     systemPrompt: SYSTEM_PROMPT_DIGEST,
     userPrompt,
+    timeoutMs: 180_000,
   });
   const cleaned = extractJson(text);
   let parsed: Partial<DailyReport>;
@@ -194,6 +198,44 @@ async function callOnce(userPayloadJson: string): Promise<DailyReport> {
   };
 }
 
+/**
+ * Build a minimal fallback digest when the LLM completely fails.
+ * Instead of aborting, we produce a usable report from raw article titles
+ * so the daily output is never empty.
+ */
+function fallbackDigest(articles: ArticleInput[]): DailyReport {
+  const grouped: Record<Category, ArticleInput[]> = {
+    trending: [],
+    tech: [],
+    finance: [],
+    politics: [],
+  };
+  for (const a of articles) grouped[a.category].push(a);
+
+  const toBriefs = (items: ArticleInput[], limit: number): BriefItem[] =>
+    items.slice(0, limit).map((a) => ({
+      title: a.title,
+      url: a.url,
+      source: a.source,
+      summary: a.summary ?? a.excerpt ?? "",
+      importance: 5,
+    }));
+
+  return {
+    hero_headline: REPORT_LOCALE === "en"
+      ? `Daily Brief — ${new Date().toISOString().slice(0, 10)}`
+      : `每日简报 — ${new Date().toISOString().slice(0, 10)}`,
+    daily_overview: REPORT_LOCALE === "en"
+      ? "Auto-generated fallback: LLM digest failed. Showing raw article titles."
+      : "自动降级简报：LLM 生成失败，以下为原始文章列表。",
+    tech_briefs: toBriefs(grouped.tech, 5),
+    finance_briefs: toBriefs(grouped.finance, 5),
+    politics_briefs: toBriefs(grouped.politics, 3),
+    editor_note: "",
+    keywords: [],
+  };
+}
+
 export async function generateDailyReport(
   articles: ArticleInput[],
 ): Promise<{ report: DailyReport; tokensUsed: number }> {
@@ -220,18 +262,31 @@ export async function generateDailyReport(
   }));
   const userPayloadJson = JSON.stringify(userPayload);
 
-  let report: DailyReport;
+  let report: DailyReport = fallbackDigest(articles);
   try {
     report = await callOnce(userPayloadJson);
   } catch (firstErr) {
-    // One retry — claude CLI occasionally wraps in narration on the first
-    // pass but obeys when the same prompt is repeated.
-    console.warn(
-      `[pipeline] first claude CLI call failed, retrying: ${
-        firstErr instanceof Error ? firstErr.message : String(firstErr)
-      }`,
-    );
-    report = await callOnce(userPayloadJson);
+    // Up to two retries — claude CLI occasionally wraps in narration on
+    // early passes but obeys when the same prompt is repeated.
+    let lastErr = firstErr;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      console.warn(
+        `[pipeline] claude CLI call failed (attempt ${attempt}/2): ${
+          lastErr instanceof Error ? lastErr.message : String(lastErr)
+        }`,
+      );
+      try {
+        report = await callOnce(userPayloadJson);
+        lastErr = undefined;
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (lastErr) {
+      console.warn("[pipeline] all claude CLI attempts failed, using fallback digest");
+      report = fallbackDigest(articles);
+    }
   }
 
   // Max subscription has no per-call token meter — we expose 0 for schema

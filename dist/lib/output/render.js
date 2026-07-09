@@ -1,211 +1,164 @@
-import type {
-  ArticleInput,
-  BriefItem,
-  DailyReport,
-  TradingSection,
-} from "../ai/pipeline";
-import type { WatchlistPick } from "../ai/trading-commentary";
 import { REPORT_LOCALE } from "../sources/registry";
 import { getReportTz } from "../utils";
-import type { Category, SourceDef } from "../sources/types";
 import { V2EX_OFF_TOPIC_RE } from "../sources/v2ex";
-import type { TickerAnalysis } from "../trading/signals";
-import {
-  getAssetGroupLabels,
-  ASSET_GROUP_ORDER,
-  type AssetGroup,
-} from "../trading/watchlist";
-
+import { getAssetGroupLabels, ASSET_GROUP_ORDER, } from "../trading/watchlist";
 // ----- i18n -----
-
 /**
  * Localized UI strings. `t` resolves to TEXTS_ZH or TEXTS_EN at module
  * init based on REPORT_LOCALE. All hardcoded display text routes through
  * this object so adding a third locale = adding one more table.
  */
 const TEXTS_ZH = {
-  siteTitle: "每日简报",
-  catTrending: "🔥 热搜趋势",
-  catTech: "🧑‍💻 技术动态",
-  catFinance: "💰 财经要点",
-  catPolitics: "🌍 国际时政",
-  catTrading: "📈 市场行情",
-  catCommunity: "💬 社区讨论",
-  subAiNews: "AI 媒体",
-  subTrendingPapers: "热门论文",
-  subXViral: "X 推文",
-  subBlogWeekly: "博客周刊",
-  subCnCommunity: "中文社区",
-  subOverseasCommunity: "海外社区",
-  subFinanceNews: "财经新闻",
-  subFinanceCommunity: "社区讨论",
-  subWorld: "国际要闻",
-  subOverseasNews: "海外科技",
-  subOverseas: "海外",
-  emptySource: "该源今日无内容。",
-  emptyCategory: "该分类今日无内容。",
-  emptyGroup: "该组今日无数据。",
-  footer: "内容均来自原媒体，本站仅作摘要整理与回链。",
-  summaryLabelNews: "中文摘要",
-  summaryLabelIntro: "中文摘要",
-  tradingMarketOverview: "市场总览",
-  tradingTodayFocus: "今日关注",
-  tradingAllAssets: "全部资产",
-  tradingRiskCaveat: "风险提示",
-  widgetCryptoFearGreed: "加密恐慌贪婪",
-  widgetCryptoCap: "加密总市值",
-  widgetBtcDom: "BTC 主导率",
-  widgetVolume24h: "24h 成交量",
-  widgetActiveCoins: "活跃币",
-  ticker5d: "5 日",
-  tickerVs52wHigh: "距 52w 高",
-  tickerTrend: "趋势",
-  tickerMacd: "MACD / 信号",
-  signalToday: "今天",
-  signalDaysAgoSuffix: "天前",
-  trendBullish: "多头",
-  trendBearish: "空头",
-  trendNeutral: "中性",
-  mdTodayOverview: "今日总览",
-  mdEditorNote: "编辑短评",
-  mdTodayKeywords: "今日关键词",
-  mdImportance: "重要度",
-  archiveLink: "← 历史归档",
+    siteTitle: "每日简报",
+    catTrending: "🔥 热搜趋势",
+    catTech: "🧑‍💻 技术动态",
+    catFinance: "💰 财经要点",
+    catPolitics: "🌍 国际时政",
+    catTrading: "📈 市场行情",
+    catCommunity: "💬 社区讨论",
+    subAiNews: "AI 媒体",
+    subTrendingPapers: "热门论文",
+    subXViral: "X 推文",
+    subBlogWeekly: "博客周刊",
+    subCnCommunity: "中文社区",
+    subOverseasCommunity: "海外社区",
+    subFinanceNews: "财经新闻",
+    subFinanceCommunity: "社区讨论",
+    subWorld: "国际要闻",
+    subOverseasNews: "海外科技",
+    subOverseas: "海外",
+    emptySource: "该源今日无内容。",
+    emptyCategory: "该分类今日无内容。",
+    emptyGroup: "该组今日无数据。",
+    footer: "内容均来自原媒体，本站仅作摘要整理与回链。",
+    summaryLabelNews: "中文摘要",
+    summaryLabelIntro: "中文摘要",
+    tradingMarketOverview: "市场总览",
+    tradingTodayFocus: "今日关注",
+    tradingAllAssets: "全部资产",
+    tradingRiskCaveat: "风险提示",
+    widgetCryptoFearGreed: "加密恐慌贪婪",
+    widgetCryptoCap: "加密总市值",
+    widgetBtcDom: "BTC 主导率",
+    widgetVolume24h: "24h 成交量",
+    widgetActiveCoins: "活跃币",
+    ticker5d: "5 日",
+    tickerVs52wHigh: "距 52w 高",
+    tickerTrend: "趋势",
+    tickerMacd: "MACD / 信号",
+    signalToday: "今天",
+    signalDaysAgoSuffix: "天前",
+    trendBullish: "多头",
+    trendBearish: "空头",
+    trendNeutral: "中性",
+    mdTodayOverview: "今日总览",
+    mdEditorNote: "编辑短评",
+    mdTodayKeywords: "今日关键词",
+    mdImportance: "重要度",
+    archiveLink: "← 历史归档",
 };
-
-const TEXTS_EN: typeof TEXTS_ZH = {
-  siteTitle: "Daily Brief",
-  catTrending: "🔥 Trending",
-  catTech: "💻 Tech",
-  catFinance: "💰 Finance",
-  catPolitics: "🌍 World",
-  catTrading: "📈 Markets",
-  catCommunity: "💬 Community",
-  subAiNews: "AI Media",
-  subTrendingPapers: "Trending Papers",
-  subXViral: "X Viral",
-  subBlogWeekly: "Blog Weekly",
-  subCnCommunity: "Chinese Community",
-  subOverseasCommunity: "Overseas Community",
-  subFinanceNews: "Finance News",
-  subFinanceCommunity: "Community",
-  subWorld: "World News",
-  subOverseasNews: "Overseas Tech",
-  subOverseas: "Overseas",
-  emptySource: "No content from this source today.",
-  emptyCategory: "No content in this category today.",
-  emptyGroup: "No data for this group today.",
-  footer:
-    "Content sourced from original publishers; this site provides summary and backlinks only.",
-  summaryLabelNews: "Summary",
-  summaryLabelIntro: "Summary",
-  tradingMarketOverview: "Market Overview",
-  tradingTodayFocus: "Today's Focus",
-  tradingAllAssets: "All Assets",
-  tradingRiskCaveat: "Risk Disclaimer",
-  widgetCryptoFearGreed: "Crypto Fear/Greed",
-  widgetCryptoCap: "Crypto Market Cap",
-  widgetBtcDom: "BTC Dominance",
-  widgetVolume24h: "24h Volume",
-  widgetActiveCoins: "Active coins",
-  ticker5d: "5d",
-  tickerVs52wHigh: "vs 52w High",
-  tickerTrend: "Trend",
-  tickerMacd: "MACD / Signal",
-  signalToday: "today",
-  signalDaysAgoSuffix: "d ago",
-  trendBullish: "Bullish",
-  trendBearish: "Bearish",
-  trendNeutral: "Neutral",
-  mdTodayOverview: "Today's Overview",
-  mdEditorNote: "Editor's Note",
-  mdTodayKeywords: "Keywords",
-  mdImportance: "Importance",
-  archiveLink: "← Archive",
+const TEXTS_EN = {
+    siteTitle: "Daily Brief",
+    catTrending: "🔥 Trending",
+    catTech: "💻 Tech",
+    catFinance: "💰 Finance",
+    catPolitics: "🌍 World",
+    catTrading: "📈 Markets",
+    catCommunity: "💬 Community",
+    subAiNews: "AI Media",
+    subTrendingPapers: "Trending Papers",
+    subXViral: "X Viral",
+    subBlogWeekly: "Blog Weekly",
+    subCnCommunity: "Chinese Community",
+    subOverseasCommunity: "Overseas Community",
+    subFinanceNews: "Finance News",
+    subFinanceCommunity: "Community",
+    subWorld: "World News",
+    subOverseasNews: "Overseas Tech",
+    subOverseas: "Overseas",
+    emptySource: "No content from this source today.",
+    emptyCategory: "No content in this category today.",
+    emptyGroup: "No data for this group today.",
+    footer: "Content sourced from original publishers; this site provides summary and backlinks only.",
+    summaryLabelNews: "Summary",
+    summaryLabelIntro: "Summary",
+    tradingMarketOverview: "Market Overview",
+    tradingTodayFocus: "Today's Focus",
+    tradingAllAssets: "All Assets",
+    tradingRiskCaveat: "Risk Disclaimer",
+    widgetCryptoFearGreed: "Crypto Fear/Greed",
+    widgetCryptoCap: "Crypto Market Cap",
+    widgetBtcDom: "BTC Dominance",
+    widgetVolume24h: "24h Volume",
+    widgetActiveCoins: "Active coins",
+    ticker5d: "5d",
+    tickerVs52wHigh: "vs 52w High",
+    tickerTrend: "Trend",
+    tickerMacd: "MACD / Signal",
+    signalToday: "today",
+    signalDaysAgoSuffix: "d ago",
+    trendBullish: "Bullish",
+    trendBearish: "Bearish",
+    trendNeutral: "Neutral",
+    mdTodayOverview: "Today's Overview",
+    mdEditorNote: "Editor's Note",
+    mdTodayKeywords: "Keywords",
+    mdImportance: "Importance",
+    archiveLink: "← Archive",
 };
-
 const STR = REPORT_LOCALE === "en" ? TEXTS_EN : TEXTS_ZH;
 const ASSET_GROUP_LABELS_LOCALIZED = getAssetGroupLabels(REPORT_LOCALE);
-
-// ----- types -----
-
-export type SourceGroup = {
-  sourceId: string;
-  sourceName: string;
-  items: ArticleInput[];
-  /**
-   * When true, items come from multiple merged sources and the renderer
-   * should label each article with `a.source` since the source-tab row
-   * is suppressed (only one synthetic group).
-   */
-  merged?: boolean;
-};
-
-export type SubGroup = {
-  id: string;
-  name: string;
-  sources: SourceGroup[];
-};
-
-export type RawByCategory = Record<Category, SubGroup[]>;
-
 // ----- labels & ordering -----
-
-const CATEGORY_LABELS: Record<Category, string> = {
-  trending: STR.catTrending,
-  tech: STR.catTech,
-  finance: STR.catFinance,
-  politics: STR.catPolitics,
+const CATEGORY_LABELS = {
+    trending: STR.catTrending,
+    tech: STR.catTech,
+    finance: STR.catFinance,
+    politics: STR.catPolitics,
 };
-
-const CATEGORY_DIGEST_LABELS: Record<Category, string> = {
-  trending: STR.catTrending,
-  tech: STR.catTech,
-  finance: STR.catFinance,
-  politics: STR.catPolitics,
+const CATEGORY_DIGEST_LABELS = {
+    trending: STR.catTrending,
+    tech: STR.catTech,
+    finance: STR.catFinance,
+    politics: STR.catPolitics,
 };
-
 /**
  * L2 ordering per category. Categories not listed render flat (no L2 tabs).
  */
-const SUBCATEGORY_ORDER: Partial<Record<Category, string[]>> = {
-  // cn-community + overseas-community are listed last so the L1 "community"
-  // panel (rendered separately via TECH_COMMUNITY_SUBS) can extract them.
-  // Within the "tech" L1 panel itself, COMMUNITY_SUBS is filtered out.
-  // Locale filtering at registry level decides which actually appears:
-  // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
-  // overseas-community (Hacker News / r/stocks).
-	  trending: ["google-trends", "cn-trending", "reddit-trending"],
-  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "cn-community", "overseas-community"],
-  finance: ["news"],
-  politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
+const SUBCATEGORY_ORDER = {
+    // cn-community + overseas-community are listed last so the L1 "community"
+    // panel (rendered separately via TECH_COMMUNITY_SUBS) can extract them.
+    // Within the "tech" L1 panel itself, COMMUNITY_SUBS is filtered out.
+    // Locale filtering at registry level decides which actually appears:
+    // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
+    // overseas-community (Hacker News / r/stocks).
+    trending: ["google-trends", "cn-trending", "reddit-trending"],
+    tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "cn-community", "overseas-community"],
+    finance: ["news"],
+    politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
 };
-
 const TECH_MAIN_SUBS = new Set(["github-trending", "trending-papers", "x-viral", "ai-news"]);
 const TECH_COMMUNITY_SUBS = new Set(["cn-community", "overseas-community"]);
-
-const SUBCATEGORY_LABELS: Record<string, string> = {
-	  "google-trends": "Google 热搜",
-	  "cn-trending": "🔥 中文热搜",
-	  "reddit-trending": "Reddit 热门",
-  "github-trending": "GitHub Trending",
-  "trending-papers": STR.subTrendingPapers,
-  "cn-community": STR.subCnCommunity,
-  "overseas-community": STR.subOverseasCommunity,
-  "ai-news": STR.subAiNews,
-  "x-viral": STR.subXViral,
-  "blog-weekly": STR.subBlogWeekly,
-  news: STR.subFinanceNews,
-  uk: "🇬🇧 英国",
-  us: "🇺🇸 美国",
-  france: "🇫🇷 法国",
-  japan: "🇯🇵 日本",
-  india: "🇮🇳 印度",
-  "east-asia": "🌏 东亚",
-  other: "🌐 其他",
-  world: STR.subWorld,
+const SUBCATEGORY_LABELS = {
+    "google-trends": "Google 热搜",
+    "cn-trending": "🔥 中文热搜",
+    "reddit-trending": "Reddit 热门",
+    "github-trending": "GitHub Trending",
+    "trending-papers": STR.subTrendingPapers,
+    "cn-community": STR.subCnCommunity,
+    "overseas-community": STR.subOverseasCommunity,
+    "ai-news": STR.subAiNews,
+    "x-viral": STR.subXViral,
+    "blog-weekly": STR.subBlogWeekly,
+    news: STR.subFinanceNews,
+    uk: "🇬🇧 英国",
+    us: "🇺🇸 美国",
+    france: "🇫🇷 法国",
+    japan: "🇯🇵 日本",
+    india: "🇮🇳 印度",
+    "east-asia": "🌏 东亚",
+    other: "🌐 其他",
+    world: STR.subWorld,
 };
-
 /**
  * Per-source item caps in the raw display, keyed by "category:subcategory".
  * Each source inside the subcategory shows up to N items. Missing keys = no cap.
@@ -214,31 +167,26 @@ const SUBCATEGORY_LABELS: Record<string, string> = {
  * comfortable scroll instead of 25-30 items. Merged subgroups (blog-weekly,
  * finance:news, politics:world) ignore this — they use MERGED_SUBGROUP_LIMITS.
  */
-const SOURCE_DISPLAY_LIMITS: Record<string, number> = {
-  "tech:github-trending": 20,
-  "tech:cn-community": 10,
-  "tech:x-viral": 20,
-  "tech:trending-papers": 20,
+const SOURCE_DISPLAY_LIMITS = {
+    "tech:github-trending": 20,
+    "tech:cn-community": 10,
+    "tech:x-viral": 20,
+    "tech:trending-papers": 20,
 };
-
 /**
  * Sources whose fetcher returns items already sorted by an engagement/heat
  * algorithm we want to preserve. groupRaw skips its default date-desc sort
  * for these so the final render reflects the source's own ranking.
  */
 const PRESERVE_FETCH_ORDER_SOURCES = new Set([
-  "attentionvc-ai",
-  "huggingface-papers",
+    "attentionvc-ai",
+    "huggingface-papers",
 ]);
-
-function displayLimitFor(
-  category: Category,
-  subId: string | undefined,
-): number | undefined {
-  if (!subId) return undefined;
-  return SOURCE_DISPLAY_LIMITS[`${category}:${subId}`];
+function displayLimitFor(category, subId) {
+    if (!subId)
+        return undefined;
+    return SOURCE_DISPLAY_LIMITS[`${category}:${subId}`];
 }
-
 /**
  * Subcategories that should collapse their sources into a single flat
  * time-sorted list (no L3 source tabs), keyed by "category:subcategory".
@@ -253,21 +201,20 @@ function displayLimitFor(
  *
  * Exported so daily.ts can read the cap to keep enrichment in sync.
  */
-export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
-	  "trending:google-trends": 10,
-	  "trending:cn-trending": 10,
-	  "trending:reddit-trending": 10,
-	  "tech:ai-news": 15,
-	  "finance:news": 12,
-	  "politics:uk": 15,
-	  "politics:us": 15,
-	  "politics:france": 15,
-	  "politics:japan": 15,
-	  "politics:india": 15,
-	  "politics:east-asia": 15,
-	  "politics:other": 15,
+export const MERGED_SUBGROUP_LIMITS = {
+    "trending:google-trends": 10,
+    "trending:cn-trending": 10,
+    "trending:reddit-trending": 10,
+    "tech:ai-news": 15,
+    "finance:news": 12,
+    "politics:uk": 15,
+    "politics:us": 15,
+    "politics:france": 15,
+    "politics:japan": 15,
+    "politics:india": 15,
+    "politics:east-asia": 15,
+    "politics:other": 15,
 };
-
 /**
  * Politics sources (especially Al Jazeera / BBC / The Diplomat) regularly
  * mix in World Cup / Olympic / football coverage. Filter at the title level
@@ -276,236 +223,212 @@ export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
  * Pattern is intentionally specific — avoid generic words like "team" or
  * "match" that overlap with diplomacy headlines.
  */
-const POLITICS_SPORTS_RE =
-  /\b(World\s*Cup|Olympics?|UEFA|FIFA|NBA|NFL|NHL|MLB|ATP|WTA|Premier\s*League|Bundesliga|La\s*Liga|Serie\s*A|Champions\s*League|Eurovision|Wimbledon|Grand\s*Slam|F1|Formula\s*1|Ronaldo|Messi|Mbappe|Beckham|Lukaku|Mitoma|sportsman|footballer|squad)\b|世界杯|奥运|残奥|冬奥|欧冠|英超|西甲|意甲|德甲|网球|足球|篮球|高尔夫|棒球|板球|橄榄球/i;
-
-export function isSportsArticle(title: string): boolean {
-  return POLITICS_SPORTS_RE.test(title);
+const POLITICS_SPORTS_RE = /\b(World\s*Cup|Olympics?|UEFA|FIFA|NBA|NFL|NHL|MLB|ATP|WTA|Premier\s*League|Bundesliga|La\s*Liga|Serie\s*A|Champions\s*League|Eurovision|Wimbledon|Grand\s*Slam|F1|Formula\s*1|Ronaldo|Messi|Mbappe|Beckham|Lukaku|Mitoma|sportsman|footballer|squad)\b|世界杯|奥运|残奥|冬奥|欧冠|英超|西甲|意甲|德甲|网球|足球|篮球|高尔夫|棒球|板球|橄榄球/i;
+export function isSportsArticle(title) {
+    return POLITICS_SPORTS_RE.test(title);
 }
-
-function mergedLimitFor(
-  category: Category,
-  subId: string,
-): number | undefined {
-  return MERGED_SUBGROUP_LIMITS[`${category}:${subId}`];
+function mergedLimitFor(category, subId) {
+    return MERGED_SUBGROUP_LIMITS[`${category}:${subId}`];
 }
-
 // ----- grouping -----
-
-export function groupRaw(
-  articles: ArticleInput[],
-  registry: SourceDef[],
-): RawByCategory {
-  const subcatOf = new Map<string, string | undefined>();
-  for (const s of registry) subcatOf.set(s.id, s.subcategory);
-  // Drop articles from sources that have since been disabled — important
-  // when scripts/render.ts re-renders against a stale sidecar that still
-  // contains the disabled sources' fetched data.
-  const enabledIds = new Set(
-    registry.filter((s) => s.enabled !== false).map((s) => s.id),
-  );
-
-  type Bucket = { sourceName: string; items: ArticleInput[] };
-  const buckets: Record<Category, Map<string, Bucket>> = {
-    trending: new Map(),
-    tech: new Map(),
-    finance: new Map(),
-    politics: new Map(),
-  };
-  // Pre-seed empty buckets for every enabled source so per-source-tabbed
-  // subcategories (e.g. cn-community) still render a tab for sources that
-  // returned 0 items today. Without this, a transient LinuxDo Cloudflare
-  // block would silently collapse the L3 tab nav, making users wonder
-  // whether the other forum even exists.
-  for (const s of registry) {
-    if (s.enabled === false) continue;
-    if (!buckets[s.category].has(s.id)) {
-      buckets[s.category].set(s.id, { sourceName: s.name, items: [] });
-    }
-  }
-
-  for (const a of articles) {
-    if (!enabledIds.has(a.sourceId)) continue;
-    if (a.category === "politics" && isSportsArticle(a.title)) continue;
-    if (
-      (a.sourceId === "v2ex-hot" || a.sourceId === "linuxdo") &&
-      V2EX_OFF_TOPIC_RE.test(a.title)
-    )
-      continue;
-    const map = buckets[a.category];
-    let b = map.get(a.sourceId);
-    if (!b) {
-      b = { sourceName: a.source, items: [] };
-      map.set(a.sourceId, b);
-    }
-    b.items.push(a);
-  }
-
-  for (const cat of Object.keys(buckets) as Category[]) {
-    for (const [id, b] of buckets[cat].entries()) {
-      if (PRESERVE_FETCH_ORDER_SOURCES.has(id)) continue;
-      b.items.sort(
-        (a, b) =>
-          (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
-      );
-    }
-  }
-
-  function toSourceGroup(
-    sourceId: string,
-    b: Bucket,
-    limit: number | undefined,
-  ): SourceGroup {
-    return {
-      sourceId,
-      sourceName: b.sourceName,
-      items: limit ? b.items.slice(0, limit) : b.items,
+export function groupRaw(articles, registry) {
+    const subcatOf = new Map();
+    for (const s of registry)
+        subcatOf.set(s.id, s.subcategory);
+    // Drop articles from sources that have since been disabled — important
+    // when scripts/render.ts re-renders against a stale sidecar that still
+    // contains the disabled sources' fetched data.
+    const enabledIds = new Set(registry.filter((s) => s.enabled !== false).map((s) => s.id));
+    const buckets = {
+        trending: new Map(),
+        tech: new Map(),
+        finance: new Map(),
+        politics: new Map(),
     };
-  }
-
-  function sortByRegistry(list: SourceGroup[]): SourceGroup[] {
-    return [...list].sort((a, b) => {
-      const ia = registry.findIndex((s) => s.id === a.sourceId);
-      const ib = registry.findIndex((s) => s.id === b.sourceId);
-      return ia - ib;
-    });
-  }
-
-  const out: RawByCategory = { trending: [], tech: [], finance: [], politics: [] };
-
-  for (const cat of Object.keys(buckets) as Category[]) {
-    const order = SUBCATEGORY_ORDER[cat];
-    if (!order) {
-      // Flat: one synthetic subgroup with every source.
-      const sources: SourceGroup[] = [];
-      for (const [id, b] of buckets[cat].entries()) {
-        sources.push(toSourceGroup(id, b, undefined));
-      }
-      out[cat] = sources.length
-        ? [{ id: "all", name: CATEGORY_LABELS[cat], sources: sortByRegistry(sources) }]
-        : [];
-      continue;
+    // Pre-seed empty buckets for every enabled source so per-source-tabbed
+    // subcategories (e.g. cn-community) still render a tab for sources that
+    // returned 0 items today. Without this, a transient LinuxDo Cloudflare
+    // block would silently collapse the L3 tab nav, making users wonder
+    // whether the other forum even exists.
+    for (const s of registry) {
+        if (s.enabled === false)
+            continue;
+        if (!buckets[s.category].has(s.id)) {
+            buckets[s.category].set(s.id, { sourceName: s.name, items: [] });
+        }
     }
-    // Subcategory split: bucket each source under its registered subcategory.
-    const subs: SubGroup[] = [];
-    for (const subId of order) {
-      const mergeLimit = mergedLimitFor(cat, subId);
-      if (mergeLimit !== undefined) {
-        // Merge: round-robin across sources preserving each source's
-        // natural feed order (which reflects editorial priority / heat),
-        // rather than flattening by date. This ensures top stories from
-        // each source get equal opportunity regardless of publish time.
-	        const sourceBuckets: ArticleInput[][] = [];
-		        for (const [id, b] of buckets[cat].entries()) {
-	          if (subcatOf.get(id) === subId) sourceBuckets.push(b.items);
-	        }
-	        if (sourceBuckets.length === 0) continue;
-	        const merged: ArticleInput[] = [];
-	        let madeProgress = true;
-	        while (merged.length < mergeLimit && madeProgress) {
-	          madeProgress = false;
-	          for (const b of sourceBuckets) {
-	            if (b.length === 0) continue;
-	            merged.push(b.shift()!);
-	            madeProgress = true;
-	            if (merged.length >= mergeLimit) break;
-	          }
-	        }
-        subs.push({
-          id: subId,
-          name: SUBCATEGORY_LABELS[subId] ?? subId,
-          sources: [
-            {
-              sourceId: "_merged",
-              sourceName: SUBCATEGORY_LABELS[subId] ?? subId,
-	              items: merged.slice(0, mergeLimit),
-              merged: true,
-            },
-          ],
+    for (const a of articles) {
+        if (!enabledIds.has(a.sourceId))
+            continue;
+        if (a.category === "politics" && isSportsArticle(a.title))
+            continue;
+        if ((a.sourceId === "v2ex-hot" || a.sourceId === "linuxdo") &&
+            V2EX_OFF_TOPIC_RE.test(a.title))
+            continue;
+        const map = buckets[a.category];
+        let b = map.get(a.sourceId);
+        if (!b) {
+            b = { sourceName: a.source, items: [] };
+            map.set(a.sourceId, b);
+        }
+        b.items.push(a);
+    }
+    for (const cat of Object.keys(buckets)) {
+        for (const [id, b] of buckets[cat].entries()) {
+            if (PRESERVE_FETCH_ORDER_SOURCES.has(id))
+                continue;
+            b.items.sort((a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0));
+        }
+    }
+    function toSourceGroup(sourceId, b, limit) {
+        return {
+            sourceId,
+            sourceName: b.sourceName,
+            items: limit ? b.items.slice(0, limit) : b.items,
+        };
+    }
+    function sortByRegistry(list) {
+        return [...list].sort((a, b) => {
+            const ia = registry.findIndex((s) => s.id === a.sourceId);
+            const ib = registry.findIndex((s) => s.id === b.sourceId);
+            return ia - ib;
         });
-        continue;
-      }
-
-      const limit = displayLimitFor(cat, subId);
-      const sources: SourceGroup[] = [];
-      for (const [id, b] of buckets[cat].entries()) {
-        if (subcatOf.get(id) === subId) sources.push(toSourceGroup(id, b, limit));
-      }
-      if (sources.length === 0) continue;
-      subs.push({
-        id: subId,
-        name: SUBCATEGORY_LABELS[subId] ?? subId,
-        sources: sortByRegistry(sources),
-      });
     }
-    out[cat] = subs;
-  }
-
-  return out;
+    const out = { trending: [], tech: [], finance: [], politics: [] };
+    for (const cat of Object.keys(buckets)) {
+        const order = SUBCATEGORY_ORDER[cat];
+        if (!order) {
+            // Flat: one synthetic subgroup with every source.
+            const sources = [];
+            for (const [id, b] of buckets[cat].entries()) {
+                sources.push(toSourceGroup(id, b, undefined));
+            }
+            out[cat] = sources.length
+                ? [{ id: "all", name: CATEGORY_LABELS[cat], sources: sortByRegistry(sources) }]
+                : [];
+            continue;
+        }
+        // Subcategory split: bucket each source under its registered subcategory.
+        const subs = [];
+        for (const subId of order) {
+            const mergeLimit = mergedLimitFor(cat, subId);
+            if (mergeLimit !== undefined) {
+                // Merge: round-robin across sources preserving each source's
+                // natural feed order (which reflects editorial priority / heat),
+                // rather than flattening by date. This ensures top stories from
+                // each source get equal opportunity regardless of publish time.
+                const sourceBuckets = [];
+                for (const [id, b] of buckets[cat].entries()) {
+                    if (subcatOf.get(id) === subId)
+                        sourceBuckets.push(b.items);
+                }
+                if (sourceBuckets.length === 0)
+                    continue;
+                const merged = [];
+                let madeProgress = true;
+                while (merged.length < mergeLimit && madeProgress) {
+                    madeProgress = false;
+                    for (const b of sourceBuckets) {
+                        if (b.length === 0)
+                            continue;
+                        merged.push(b.shift());
+                        madeProgress = true;
+                        if (merged.length >= mergeLimit)
+                            break;
+                    }
+                }
+                subs.push({
+                    id: subId,
+                    name: SUBCATEGORY_LABELS[subId] ?? subId,
+                    sources: [
+                        {
+                            sourceId: "_merged",
+                            sourceName: SUBCATEGORY_LABELS[subId] ?? subId,
+                            items: merged.slice(0, mergeLimit),
+                            merged: true,
+                        },
+                    ],
+                });
+                continue;
+            }
+            const limit = displayLimitFor(cat, subId);
+            const sources = [];
+            for (const [id, b] of buckets[cat].entries()) {
+                if (subcatOf.get(id) === subId)
+                    sources.push(toSourceGroup(id, b, limit));
+            }
+            if (sources.length === 0)
+                continue;
+            subs.push({
+                id: subId,
+                name: SUBCATEGORY_LABELS[subId] ?? subId,
+                sources: sortByRegistry(sources),
+            });
+        }
+        out[cat] = subs;
+    }
+    return out;
 }
-
 // ----- HTML helpers -----
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+function escapeHtml(s) {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
-
-function formatDate(d: Date | undefined): string {
-  if (!d) return "";
-  try {
-    // zh: "05/20 16:00"  · en: "May 20, 4:00 PM" → keep 24h en-GB style "20/05 16:00"
-    const localeTag = REPORT_LOCALE === "en" ? "en-GB" : "zh-CN";
-    return d.toLocaleString(localeTag, {
-      timeZone: getReportTz(),
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  } catch {
-    return "";
-  }
+function formatDate(d) {
+    if (!d)
+        return "";
+    try {
+        // zh: "05/20 16:00"  · en: "May 20, 4:00 PM" → keep 24h en-GB style "20/05 16:00"
+        const localeTag = REPORT_LOCALE === "en" ? "en-GB" : "zh-CN";
+        return d.toLocaleString(localeTag, {
+            timeZone: getReportTz(),
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        });
+    }
+    catch {
+        return "";
+    }
 }
-
 // ----- raw article renderers -----
-
-function renderArticleHtml(a: ArticleInput, showSource = false): string {
-  const title = escapeHtml(a.title);
-  const url = escapeHtml(a.url);
-  const excerpt = a.excerpt ? escapeHtml(a.excerpt) : "";
-  // Backwards-compat: old sidecar JSON files may carry `cnSummary` instead.
-  const summaryText = a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary;
-  const summary = summaryText ? escapeHtml(summaryText) : "";
-  const stats = a.meta ? escapeHtml(a.meta) : "";
-  const time = formatDate(a.publishedAt);
-  const sourceLabel = showSource && a.source ? escapeHtml(a.source) : "";
-  // For merged subgroups (politics/finance/trending), the source name + time
-  // identifies the article → no need for the full English headline.
-  // For per-source tabs (GH Trending, Papers, X), show a brief title.
-  // When showSource is true, we're inside a merged group → hide the title.
-  const showTitle = !showSource;
-  // Build meta line: source name (clickable link) + rest of meta
-  let metaHtml = "";
-  if (sourceLabel) {
-    const sourceLink = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-source-link">${sourceLabel}</a>`;
-    metaHtml = time ? `${sourceLink} · ${time}` : sourceLink;
-  } else if (time) {
-    metaHtml = time;
-  }
-  // News-style summary label for finance/politics, project-intro style for GH/tech.
-  const newsy = a.category === "trending" || a.category === "finance" || a.category === "politics";
-  const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
-  // Content attribute tags
-  const tags = a.tags && a.tags.length > 0 ? a.tags : null;
-  const tagAttr = tags ? ` data-tags="${escapeHtml(tags.join(","))}"` : "";
-
-  return `<article class="article"${tagAttr}>
+function renderArticleHtml(a, showSource = false) {
+    const title = escapeHtml(a.title);
+    const url = escapeHtml(a.url);
+    const excerpt = a.excerpt ? escapeHtml(a.excerpt) : "";
+    // Backwards-compat: old sidecar JSON files may carry `cnSummary` instead.
+    const summaryText = a.summary ?? a.cnSummary;
+    const summary = summaryText ? escapeHtml(summaryText) : "";
+    const stats = a.meta ? escapeHtml(a.meta) : "";
+    const time = formatDate(a.publishedAt);
+    const sourceLabel = showSource && a.source ? escapeHtml(a.source) : "";
+    // For merged subgroups (politics/finance/trending), the source name + time
+    // identifies the article → no need for the full English headline.
+    // For per-source tabs (GH Trending, Papers, X), show a brief title.
+    // When showSource is true, we're inside a merged group → hide the title.
+    const showTitle = !showSource;
+    // Build meta line: source name (clickable link) + rest of meta
+    let metaHtml = "";
+    if (sourceLabel) {
+        const sourceLink = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-source-link">${sourceLabel}</a>`;
+        metaHtml = time ? `${sourceLink} · ${time}` : sourceLink;
+    }
+    else if (time) {
+        metaHtml = time;
+    }
+    // News-style summary label for finance/politics, project-intro style for GH/tech.
+    const newsy = a.category === "trending" || a.category === "finance" || a.category === "politics";
+    const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
+    // Content attribute tags
+    const tags = a.tags && a.tags.length > 0 ? a.tags : null;
+    const tagAttr = tags ? ` data-tags="${escapeHtml(tags.join(","))}"` : "";
+    return `<article class="article"${tagAttr}>
     ${metaHtml ? `<p class="article-meta">${metaHtml}</p>` : ""}
     ${showTitle ? `<h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>` : ""}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
@@ -515,170 +438,132 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
     ${metaHtml || showTitle ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${title}">🔗</a>` : ""}
   </article>`;
 }
-
-function renderSourceContent(
-  category: Category,
-  subId: string,
-  source: SourceGroup,
-  isActive: boolean,
-): string {
-  const showSource = source.merged === true;
-  // Filter out articles that have no meaningful content:
-  // must have either a summary, or an excerpt longer than 30 chars, or a title.
-  // This prevents "empty" article cards from occupying space.
-  const visibleItems = source.items.filter(
-    (a) => a.summary || (a.excerpt && a.excerpt.length > 30) || a.title,
-  );
-  if (visibleItems.length === 0) return "";
-  return `<div class="source-content${isActive ? " active" : ""}" data-source-content="${escapeHtml(source.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">
+function renderSourceContent(category, subId, source, isActive) {
+    const showSource = source.merged === true;
+    // Filter out articles that have no meaningful content:
+    // must have either a summary, or an excerpt longer than 30 chars, or a title.
+    // This prevents "empty" article cards from occupying space.
+    const visibleItems = source.items.filter((a) => a.summary || (a.excerpt && a.excerpt.length > 30) || a.title);
+    if (visibleItems.length === 0)
+        return "";
+    return `<div class="source-content${isActive ? " active" : ""}" data-source-content="${escapeHtml(source.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">
     ${visibleItems.map((a) => renderArticleHtml(a, showSource)).join("\n")}
   </div>`;
 }
-
-function renderSourceTabs(
-  category: Category,
-  subId: string,
-  sources: SourceGroup[],
-): string {
-  // Single-source L2s (X 推文 / GitHub Trending) skip the L3 row — the L2 tab
-  // label already identifies the dataset. L3 only earns its row when there
-  // are ≥2 sources to switch between (e.g. 社区讨论 V2EX vs LinuxDo).
-  if (sources.length < 2) return "";
-  return `<nav class="source-tabs">${sources
-    .map(
-      (s, i) =>
-        `<button class="source-tab${i === 0 ? " active" : ""}" data-source="${escapeHtml(s.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">${escapeHtml(s.sourceName)}<span class="count">${s.items.length}</span></button>`,
-    )
-    .join("")}</nav>`;
+function renderSourceTabs(category, subId, sources) {
+    // Single-source L2s (X 推文 / GitHub Trending) skip the L3 row — the L2 tab
+    // label already identifies the dataset. L3 only earns its row when there
+    // are ≥2 sources to switch between (e.g. 社区讨论 V2EX vs LinuxDo).
+    if (sources.length < 2)
+        return "";
+    return `<nav class="source-tabs">${sources
+        .map((s, i) => `<button class="source-tab${i === 0 ? " active" : ""}" data-source="${escapeHtml(s.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">${escapeHtml(s.sourceName)}<span class="count">${s.items.length}</span></button>`)
+        .join("")}</nav>`;
 }
-
-function renderSubContent(category: Category, sub: SubGroup, isActive: boolean): string {
-  return `<div class="sub-content${isActive ? " active" : ""}" data-sub-content="${escapeHtml(sub.id)}" data-cat="${category}">
+function renderSubContent(category, sub, isActive) {
+    return `<div class="sub-content${isActive ? " active" : ""}" data-sub-content="${escapeHtml(sub.id)}" data-cat="${category}">
     ${renderSourceTabs(category, sub.id, sub.sources)}
     <div class="source-contents">
       ${sub.sources.map((s, i) => renderSourceContent(category, sub.id, s, i === 0)).join("\n")}
     </div>
   </div>`;
 }
-
-function renderRawCategoryPanel(
-  category: Category,
-  subs: SubGroup[],
-): string {
-  if (subs.length === 0) {
-    return `<p class="empty">${STR.emptyCategory}</p>`;
-  }
-  if (subs.length === 1) {
-    return renderSubContent(category, subs[0], true);
-  }
-  const subTabs = subs
-    .map((s, i) => {
-      const count = s.sources.reduce((n, src) => n + src.items.length, 0);
-      return `<button class="sub-tab${i === 0 ? " active" : ""}" data-sub="${escapeHtml(s.id)}" data-cat="${category}">${escapeHtml(s.name)}<span class="count">${count}</span></button>`;
+function renderRawCategoryPanel(category, subs) {
+    if (subs.length === 0) {
+        return `<p class="empty">${STR.emptyCategory}</p>`;
+    }
+    if (subs.length === 1) {
+        return renderSubContent(category, subs[0], true);
+    }
+    const subTabs = subs
+        .map((s, i) => {
+        const count = s.sources.reduce((n, src) => n + src.items.length, 0);
+        return `<button class="sub-tab${i === 0 ? " active" : ""}" data-sub="${escapeHtml(s.id)}" data-cat="${category}">${escapeHtml(s.name)}<span class="count">${count}</span></button>`;
     })
-    .join("");
-  const panels = subs
-    .map((s, i) => renderSubContent(category, s, i === 0))
-    .join("\n");
-  return `<nav class="sub-tabs">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
+        .join("");
+    const panels = subs
+        .map((s, i) => renderSubContent(category, s, i === 0))
+        .join("\n");
+    return `<nav class="sub-tabs">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
 }
-
-// ----- tag cloud -----
-
-interface TagEntry {
-  tag: string;
-  count: number;
-}
-
 /**
  * Collect all tags across every article in the raw data, count frequency,
  * and return sorted by count descending. Takes at most topN tags.
  */
-function buildTagCloud(raw: RawByCategory, topN = 50): TagEntry[] {
-  const freq = new Map<string, number>();
-  for (const cat of Object.keys(raw) as Category[]) {
-    for (const sub of raw[cat]) {
-      for (const sg of sub.sources) {
-        for (const a of sg.items) {
-          if (a.tags && a.tags.length > 0) {
-            for (const t of a.tags) {
-              freq.set(t, (freq.get(t) ?? 0) + 1);
+function buildTagCloud(raw, topN = 50) {
+    const freq = new Map();
+    for (const cat of Object.keys(raw)) {
+        for (const sub of raw[cat]) {
+            for (const sg of sub.sources) {
+                for (const a of sg.items) {
+                    if (a.tags && a.tags.length > 0) {
+                        for (const t of a.tags) {
+                            freq.set(t, (freq.get(t) ?? 0) + 1);
+                        }
+                    }
+                }
             }
-          }
         }
-      }
     }
-  }
-  return Array.from(freq.entries())
-    .map(([tag, count]) => ({ tag, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, topN);
+    return Array.from(freq.entries())
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, topN);
 }
-
 /**
  * Heat-level for a tag's popularity within the cloud.
  * Top 10% → 3 (hottest), 10-25% → 2, 25-50% → 1, bottom 50% → 0 (cool).
  */
-function heatLevel(index: number, total: number): number {
-  const pct = total > 1 ? index / (total - 1) : 0;
-  if (pct < 0.1) return 3;
-  if (pct < 0.25) return 2;
-  if (pct < 0.5) return 1;
-  return 0;
+function heatLevel(index, total) {
+    const pct = total > 1 ? index / (total - 1) : 0;
+    if (pct < 0.1)
+        return 3;
+    if (pct < 0.25)
+        return 2;
+    if (pct < 0.5)
+        return 1;
+    return 0;
 }
-
-function renderTagCloud(tags: TagEntry[]): string {
-  if (tags.length === 0) return "";
-  const heading = REPORT_LOCALE === "en" ? "Hot Tags" : "热点标签";
-  const heatColors = ["tag-heat-0", "tag-heat-1", "tag-heat-2", "tag-heat-3"];
-  const SHOW_LIMIT = 25;
-  const allChips = tags.map((t, i) => {
-    const cls = heatColors[heatLevel(i, tags.length)];
-    return `<span class="tag-cloud-chip ${cls}" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></span>`;
-  });
-  const visibleChips = allChips.slice(0, SHOW_LIMIT);
-  const hiddenChips = allChips.slice(SHOW_LIMIT);
-  const expandBtn = hiddenChips.length > 0
-    ? `<button class="tag-cloud-expand" data-expanded="false">${REPORT_LOCALE === "en" ? `+${hiddenChips.length} more` : `+${hiddenChips.length} 更多`}</button>`
-    : "";
-  return `<section class="tag-cloud">
+function renderTagCloud(tags) {
+    if (tags.length === 0)
+        return "";
+    const heading = REPORT_LOCALE === "en" ? "Hot Tags" : "热点标签";
+    const heatColors = ["tag-heat-0", "tag-heat-1", "tag-heat-2", "tag-heat-3"];
+    const SHOW_LIMIT = 25;
+    const allChips = tags.map((t, i) => {
+        const cls = heatColors[heatLevel(i, tags.length)];
+        return `<span class="tag-cloud-chip ${cls}" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></span>`;
+    });
+    const visibleChips = allChips.slice(0, SHOW_LIMIT);
+    const hiddenChips = allChips.slice(SHOW_LIMIT);
+    const expandBtn = hiddenChips.length > 0
+        ? `<button class="tag-cloud-expand" data-expanded="false">${REPORT_LOCALE === "en" ? `+${hiddenChips.length} more` : `+${hiddenChips.length} 更多`}</button>`
+        : "";
+    return `<section class="tag-cloud">
     <p class="tag-cloud-heading">${heading}</p>
     <div class="tag-cloud-body">${visibleChips.join("")}${hiddenChips.length > 0 ? `<span class="tag-cloud-hidden">${hiddenChips.join("")}</span>` : ""}${expandBtn}</div>
   </section>`;
 }
-
 // ----- top-level renderer -----
-
-export function renderHtml(
-  report: DailyReport,
-  raw: RawByCategory,
-  date: string,
-  failedSources?: Array<{ id: string; name: string; reason: string }>,
-): string {
-  const trading = report.trading;
-
-  // Split tech raw subgroups: "tech" L1 panel (github-trending + ai-news)
-  // vs. "community" L1 panel (cn-community). Keeps the registry simple
-  // (V2EX/LinuxDo still live under category=tech) while exposing the
-  // forums as their own top-level tab per UX preference.
-  const techMainSubs = raw.tech.filter((s) => TECH_MAIN_SUBS.has(s.id));
-  const techCommunitySubs = raw.tech.filter((s) => TECH_COMMUNITY_SUBS.has(s.id));
-
-  const sumItems = (subs: SubGroup[]) =>
-    subs.reduce(
-      (n, sg) => n + sg.sources.reduce((m, s) => m + s.items.length, 0),
-      0,
-    );
-	  const counts = {
-	    trending: sumItems(raw.trending),
-	    tech: sumItems(techMainSubs),
-	    finance: sumItems(raw.finance),
-	    politics: sumItems(raw.politics),
-	    community: sumItems(techCommunitySubs),
-	  };
-	  const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
-  const failedHtml = failedSources && failedSources.length > 0
-    ? `<section class="failed-sources">
+export function renderHtml(report, raw, date, failedSources) {
+    const trading = report.trading;
+    // Split tech raw subgroups: "tech" L1 panel (github-trending + ai-news)
+    // vs. "community" L1 panel (cn-community). Keeps the registry simple
+    // (V2EX/LinuxDo still live under category=tech) while exposing the
+    // forums as their own top-level tab per UX preference.
+    const techMainSubs = raw.tech.filter((s) => TECH_MAIN_SUBS.has(s.id));
+    const techCommunitySubs = raw.tech.filter((s) => TECH_COMMUNITY_SUBS.has(s.id));
+    const sumItems = (subs) => subs.reduce((n, sg) => n + sg.sources.reduce((m, s) => m + s.items.length, 0), 0);
+    const counts = {
+        trending: sumItems(raw.trending),
+        tech: sumItems(techMainSubs),
+        finance: sumItems(raw.finance),
+        politics: sumItems(raw.politics),
+        community: sumItems(techCommunitySubs),
+    };
+    const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
+    const failedHtml = failedSources && failedSources.length > 0
+        ? `<section class="failed-sources">
     <p class="failed-sources-heading">${REPORT_LOCALE === "en" ? "Failed Sources" : "抓取失败源"}</p>
     ${failedSources.map((f) => `<div class="failed-source-item">
       <span class="failed-source-name">${escapeHtml(f.name)}</span>
@@ -686,9 +571,8 @@ export function renderHtml(
       <button class="refetch-btn" data-source-id="${escapeHtml(f.id)}">${REPORT_LOCALE === "en" ? "Refetch" : "重新抓取"}</button>
     </div>`).join("")}
   </section>`
-    : "";
-
-  return `<!doctype html>
+        : "";
+    return `<!doctype html>
 <html lang="${REPORT_LOCALE === "en" ? "en" : "zh-CN"}">
 <head>
 <meta charset="utf-8">
@@ -758,14 +642,14 @@ export function renderHtml(
     }
   }
   *, *::before, *::after { box-sizing: border-box; }
-  html { scroll-behavior: smooth; font-size: 17px; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
       "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    line-height: 1.7;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -979,7 +863,7 @@ export function renderHtml(
   .brief-rank.mid  { background: var(--rank-mid-bg);  color: var(--rank-mid-fg); }
   .brief-rank.low  { background: var(--rank-low-bg);  color: var(--rank-low-fg); }
   .brief-title {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
     margin: 0 0 0.25rem;
     line-height: 1.4;
@@ -989,8 +873,8 @@ export function renderHtml(
   .brief-summary {
     margin: 0;
     color: var(--fg-soft);
-    font-size: 0.9rem;
-    line-height: 1.7;
+    font-size: 0.84rem;
+    line-height: 1.6;
   }
 
   .editor-card {
@@ -1101,7 +985,7 @@ export function renderHtml(
   .article:last-child { border-bottom: none; }
   .article:hover { background: var(--card); margin: 0 -0.5rem; padding-left: 0.5rem; padding-right: 0.5rem; border-radius: var(--radius-sm); }
   .article-title {
-    font-size: 0.92rem;
+    font-size: 0.98rem;
     margin: 0 0 0.25rem;
     font-weight: 600;
     line-height: 1.45;
@@ -1118,7 +1002,7 @@ export function renderHtml(
   .article-excerpt {
     margin: 0.3rem 0 0;
     color: var(--muted);
-    font-size: 0.72rem;
+    font-size: 0.74rem;
     line-height: 1.5;
     font-style: italic;
   }
@@ -1128,8 +1012,8 @@ export function renderHtml(
     background: var(--card);
     border-left: 2px solid var(--link);
     border-radius: var(--radius-sm);
-    font-size: 0.92rem;
-    line-height: 1.7;
+    font-size: 0.88rem;
+    line-height: 1.65;
     color: var(--fg);
   }
   .summary-label {
@@ -1836,57 +1720,54 @@ export function renderHtml(
 </body>
 </html>`;
 }
-
 // ----- trading panel -----
-
-const SIGNAL_TONE: Record<string, "bull" | "bear" | "caution"> = {
-  "golden-cross": "bull",
-  "macd-bull-cross": "bull",
-  "above-sma50-sma200": "bull",
-  "near-52w-high": "bull",
-  "death-cross": "bear",
-  "macd-bear-cross": "bear",
-  "below-sma50-sma200": "bear",
-  "near-52w-low": "bear",
-  "rsi-overbought": "caution",
-  "rsi-oversold": "caution",
+const SIGNAL_TONE = {
+    "golden-cross": "bull",
+    "macd-bull-cross": "bull",
+    "above-sma50-sma200": "bull",
+    "near-52w-high": "bull",
+    "death-cross": "bear",
+    "macd-bear-cross": "bear",
+    "below-sma50-sma200": "bear",
+    "near-52w-low": "bear",
+    "rsi-overbought": "caution",
+    "rsi-oversold": "caution",
 };
-
-const TREND_LABEL: Record<TickerAnalysis["trend"], string> = {
-  bullish: STR.trendBullish,
-  bearish: STR.trendBearish,
-  neutral: STR.trendNeutral,
+const TREND_LABEL = {
+    bullish: STR.trendBullish,
+    bearish: STR.trendBearish,
+    neutral: STR.trendNeutral,
 };
-
-function stanceClass(stance: string): "bull" | "bear" | "neutral" {
-  // Supports both legacy ("看多"/"看空") and current ("偏上行"/"偏下行")
-  // stance values. The current values were chosen to avoid Sonnet's
-  // "no investment advice" guardrail; rendering keeps both readable.
-  if (/多|涨|上行|bull/i.test(stance)) return "bull";
-  if (/空|跌|下行|bear/i.test(stance)) return "bear";
-  return "neutral";
+function stanceClass(stance) {
+    // Supports both legacy ("看多"/"看空") and current ("偏上行"/"偏下行")
+    // stance values. The current values were chosen to avoid Sonnet's
+    // "no investment advice" guardrail; rendering keeps both readable.
+    if (/多|涨|上行|bull/i.test(stance))
+        return "bull";
+    if (/空|跌|下行|bear/i.test(stance))
+        return "bear";
+    return "neutral";
 }
-
-function fmtNum(n: number | null | undefined, dp = 2): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  // Use thousand separators only for prices >= 1000
-  const abs = Math.abs(n);
-  if (abs >= 1000) return n.toFixed(dp).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return n.toFixed(dp);
+function fmtNum(n, dp = 2) {
+    if (n == null || !Number.isFinite(n))
+        return "—";
+    // Use thousand separators only for prices >= 1000
+    const abs = Math.abs(n);
+    if (abs >= 1000)
+        return n.toFixed(dp).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return n.toFixed(dp);
 }
-
-function fmtPct(n: number, dp = 2): string {
-  const sign = n >= 0 ? "+" : "";
-  return `${sign}${n.toFixed(dp)}%`;
+function fmtPct(n, dp = 2) {
+    const sign = n >= 0 ? "+" : "";
+    return `${sign}${n.toFixed(dp)}%`;
 }
-
-function renderPickCard(p: WatchlistPick): string {
-  const cls = stanceClass(p.stance);
-  const symbol = escapeHtml(p.symbol);
-  const name = escapeHtml(p.display_name ?? p.symbol);
-  const stance = escapeHtml(p.stance);
-  const rationale = escapeHtml(p.rationale ?? "");
-  return `<article class="trading-pick stance-${cls}">
+function renderPickCard(p) {
+    const cls = stanceClass(p.stance);
+    const symbol = escapeHtml(p.symbol);
+    const name = escapeHtml(p.display_name ?? p.symbol);
+    const stance = escapeHtml(p.stance);
+    const rationale = escapeHtml(p.rationale ?? "");
+    return `<article class="trading-pick stance-${cls}">
     <header class="pick-head">
       <div class="pick-symbol-block">
         <span class="pick-symbol">${symbol}</span>
@@ -1897,23 +1778,21 @@ function renderPickCard(p: WatchlistPick): string {
     <p class="pick-rationale">${rationale}</p>
   </article>`;
 }
-
-function renderTickerCard(t: TickerAnalysis): string {
-  const trendCls = t.trend;
-  const priceCls = t.pct1Day >= 0 ? "positive" : "negative";
-  const pct5Cls = t.pct5Day >= 0 ? "positive" : "negative";
-  const signals = t.signals
-    .map((s) => {
-      const tone = SIGNAL_TONE[s.type] ?? "caution";
-      const ageSuffix =
-        s.daysAgo !== undefined
-          ? ` <span class="signal-age">(${s.daysAgo === 0 ? STR.signalToday : `${s.daysAgo} ${STR.signalDaysAgoSuffix}`})</span>`
-          : "";
-      return `<span class="signal-pill tone-${tone}">${escapeHtml(s.label)}${ageSuffix}</span>`;
+function renderTickerCard(t) {
+    const trendCls = t.trend;
+    const priceCls = t.pct1Day >= 0 ? "positive" : "negative";
+    const pct5Cls = t.pct5Day >= 0 ? "positive" : "negative";
+    const signals = t.signals
+        .map((s) => {
+        const tone = SIGNAL_TONE[s.type] ?? "caution";
+        const ageSuffix = s.daysAgo !== undefined
+            ? ` <span class="signal-age">(${s.daysAgo === 0 ? STR.signalToday : `${s.daysAgo} ${STR.signalDaysAgoSuffix}`})</span>`
+            : "";
+        return `<span class="signal-pill tone-${tone}">${escapeHtml(s.label)}${ageSuffix}</span>`;
     })
-    .join("");
-  const currencyPrefix = t.currency === "USD" ? "$" : t.currency === "HKD" ? "HK$" : t.currency === "CNY" ? "¥" : "";
-  return `<article class="ticker-card">
+        .join("");
+    const currencyPrefix = t.currency === "USD" ? "$" : t.currency === "HKD" ? "HK$" : t.currency === "CNY" ? "¥" : "";
+    return `<article class="ticker-card">
     <header class="ticker-head">
       <div class="ticker-id">
         <h3 class="ticker-symbol">${escapeHtml(t.symbol)}</h3>
@@ -1935,101 +1814,96 @@ function renderTickerCard(t: TickerAnalysis): string {
     ${signals ? `<div class="ticker-signals">${signals}</div>` : ""}
   </article>`;
 }
-
-function fearGreedTone(value: number): "fear-extreme" | "fear" | "neutral" | "greed" | "greed-extreme" {
-  if (value <= 24) return "fear-extreme";
-  if (value <= 44) return "fear";
-  if (value <= 55) return "neutral";
-  if (value <= 74) return "greed";
-  return "greed-extreme";
+function fearGreedTone(value) {
+    if (value <= 24)
+        return "fear-extreme";
+    if (value <= 44)
+        return "fear";
+    if (value <= 55)
+        return "neutral";
+    if (value <= 74)
+        return "greed";
+    return "greed-extreme";
 }
-
-function fmtBigUsd(n: number): string {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)} T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)} B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)} M`;
-  return `$${n.toFixed(0)}`;
+function fmtBigUsd(n) {
+    if (n >= 1e12)
+        return `$${(n / 1e12).toFixed(2)} T`;
+    if (n >= 1e9)
+        return `$${(n / 1e9).toFixed(1)} B`;
+    if (n >= 1e6)
+        return `$${(n / 1e6).toFixed(1)} M`;
+    return `$${n.toFixed(0)}`;
 }
-
-function renderCryptoWidgets(t: TradingSection): string {
-  const fg = t.crypto_fear_greed;
-  const cg = t.crypto_global;
-  if (!fg && !cg) return "";
-  const items: string[] = [];
-  if (fg) {
-    const tone = fearGreedTone(fg.value);
-    items.push(`<div class="crypto-widget fg-${tone}">
+function renderCryptoWidgets(t) {
+    const fg = t.crypto_fear_greed;
+    const cg = t.crypto_global;
+    if (!fg && !cg)
+        return "";
+    const items = [];
+    if (fg) {
+        const tone = fearGreedTone(fg.value);
+        items.push(`<div class="crypto-widget fg-${tone}">
       <div class="widget-label">${STR.widgetCryptoFearGreed}</div>
       <div class="widget-value">${fg.value}</div>
       <div class="widget-sub">${escapeHtml(fg.classificationCn)}</div>
     </div>`);
-  }
-  if (cg) {
-    const tone = cg.marketCapChangePct24h >= 0 ? "positive" : "negative";
-    items.push(`<div class="crypto-widget">
+    }
+    if (cg) {
+        const tone = cg.marketCapChangePct24h >= 0 ? "positive" : "negative";
+        items.push(`<div class="crypto-widget">
       <div class="widget-label">${STR.widgetCryptoCap}</div>
       <div class="widget-value">${fmtBigUsd(cg.totalMarketCapUsd)}</div>
       <div class="widget-sub ${tone}">${fmtPct(cg.marketCapChangePct24h)} / 24h</div>
     </div>`);
-    items.push(`<div class="crypto-widget">
+        items.push(`<div class="crypto-widget">
       <div class="widget-label">${STR.widgetBtcDom}</div>
       <div class="widget-value">${cg.btcDominance.toFixed(1)}%</div>
       <div class="widget-sub">ETH ${cg.ethDominance.toFixed(1)}%</div>
     </div>`);
-    items.push(`<div class="crypto-widget">
+        items.push(`<div class="crypto-widget">
       <div class="widget-label">${STR.widgetVolume24h}</div>
       <div class="widget-value">${fmtBigUsd(cg.total24hVolumeUsd)}</div>
       <div class="widget-sub">${STR.widgetActiveCoins} ${cg.activeCryptocurrencies.toLocaleString()}</div>
     </div>`);
-  }
-  return `<div class="crypto-widgets">${items.join("")}</div>`;
+    }
+    return `<div class="crypto-widgets">${items.join("")}</div>`;
 }
-
-function renderTradingPanel(trading: TradingSection): string {
-  const tickers = trading.tickers;
-  const groupCounts: Record<AssetGroup, number> = {
-    "us-equity": 0,
-    crypto: 0,
-    "china-equity": 0,
-    "commodity-fx": 0,
-    macro: 0,
-  };
-  for (const t of tickers) groupCounts[t.group as AssetGroup] = (groupCounts[t.group as AssetGroup] ?? 0) + 1;
-
-  const groupTabs = ASSET_GROUP_ORDER.map(
-    (g, i) =>
-      `<button class="trading-group-tab${i === 0 ? " active" : ""}" data-group="${g}">${escapeHtml(ASSET_GROUP_LABELS_LOCALIZED[g])}<span class="count">${groupCounts[g] ?? 0}</span></button>`,
-  ).join("");
-
-  const groupPanels = ASSET_GROUP_ORDER.map((g, i) => {
-    const groupTickers = tickers.filter((t) => t.group === g);
-    // Crypto sub-tab carries an extra header widget panel (F&G + global stats)
-    const cryptoWidgets =
-      g === "crypto" ? renderCryptoWidgets(trading) : "";
-    return `<div class="trading-group-content${i === 0 ? " active" : ""}" data-group="${g}">
+function renderTradingPanel(trading) {
+    const tickers = trading.tickers;
+    const groupCounts = {
+        "us-equity": 0,
+        crypto: 0,
+        "china-equity": 0,
+        "commodity-fx": 0,
+        macro: 0,
+    };
+    for (const t of tickers)
+        groupCounts[t.group] = (groupCounts[t.group] ?? 0) + 1;
+    const groupTabs = ASSET_GROUP_ORDER.map((g, i) => `<button class="trading-group-tab${i === 0 ? " active" : ""}" data-group="${g}">${escapeHtml(ASSET_GROUP_LABELS_LOCALIZED[g])}<span class="count">${groupCounts[g] ?? 0}</span></button>`).join("");
+    const groupPanels = ASSET_GROUP_ORDER.map((g, i) => {
+        const groupTickers = tickers.filter((t) => t.group === g);
+        // Crypto sub-tab carries an extra header widget panel (F&G + global stats)
+        const cryptoWidgets = g === "crypto" ? renderCryptoWidgets(trading) : "";
+        return `<div class="trading-group-content${i === 0 ? " active" : ""}" data-group="${g}">
       ${cryptoWidgets}
       ${groupTickers.length === 0 ? `<p class="empty">${STR.emptyGroup}</p>` : groupTickers.map(renderTickerCard).join("")}
     </div>`;
-  }).join("");
-
-  const overview = escapeHtml(trading.market_overview ?? "");
-  const risk = escapeHtml(trading.risk_caveat ?? "");
-
-  return `<section class="trading-overview-card">
+    }).join("");
+    const overview = escapeHtml(trading.market_overview ?? "");
+    const risk = escapeHtml(trading.risk_caveat ?? "");
+    return `<section class="trading-overview-card">
     <span class="eyebrow">${STR.tradingMarketOverview}</span>
     <p class="overview-text trading-overview-text">${overview}</p>
   </section>
 
-  ${
-    trading.watchlist.length > 0
-      ? `<section class="trading-watchlist">
+  ${trading.watchlist.length > 0
+        ? `<section class="trading-watchlist">
     <h2 class="category-title trading-section-title">${STR.tradingTodayFocus}</h2>
     <div class="trading-picks">
       ${trading.watchlist.map(renderPickCard).join("\n")}
     </div>
   </section>`
-      : ""
-  }
+        : ""}
 
   <section class="trading-tickers">
     <h2 class="category-title trading-section-title">${STR.tradingAllAssets}</h2>
@@ -2037,57 +1911,39 @@ function renderTradingPanel(trading: TradingSection): string {
     <div class="trading-group-contents">${groupPanels}</div>
   </section>
 
-  ${
-    risk
-      ? `<section class="trading-risk">
+  ${risk
+        ? `<section class="trading-risk">
     <span class="eyebrow">${STR.tradingRiskCaveat}</span>
     <p>${risk}</p>
   </section>`
-      : ""
-  }`;
+        : ""}`;
 }
-
 // ----- markdown -----
-
-function renderBriefMarkdown(b: BriefItem): string {
-  const importance = Number.isFinite(b.importance) ? b.importance : 0;
-  return `### [${b.title}](${b.url})\n${b.source} · ${STR.mdImportance} ${importance}/10\n\n${b.summary}\n`;
+function renderBriefMarkdown(b) {
+    const importance = Number.isFinite(b.importance) ? b.importance : 0;
+    return `### [${b.title}](${b.url})\n${b.source} · ${STR.mdImportance} ${importance}/10\n\n${b.summary}\n`;
 }
-
-function renderSectionMarkdown(title: string, briefs: BriefItem[]): string {
-  if (briefs.length === 0) return "";
-  return `## ${title}\n\n${briefs.map(renderBriefMarkdown).join("\n")}\n`;
+function renderSectionMarkdown(title, briefs) {
+    if (briefs.length === 0)
+        return "";
+    return `## ${title}\n\n${briefs.map(renderBriefMarkdown).join("\n")}\n`;
 }
-
-export function renderMarkdown(report: DailyReport, date: string): string {
-  const blocks: string[] = [];
-  blocks.push(`# ${STR.siteTitle} · ${date}\n`);
-  if (report.hero_headline) blocks.push(`> ${report.hero_headline}\n`);
-  if (report.daily_overview) {
-    blocks.push(`## ${STR.mdTodayOverview}\n\n${report.daily_overview}\n`);
-  }
-  blocks.push(
-    renderSectionMarkdown(CATEGORY_DIGEST_LABELS.tech, report.tech_briefs),
-  );
-  blocks.push(
-    renderSectionMarkdown(
-      CATEGORY_DIGEST_LABELS.finance,
-      report.finance_briefs,
-    ),
-  );
-  blocks.push(
-    renderSectionMarkdown(
-      CATEGORY_DIGEST_LABELS.politics,
-      report.politics_briefs,
-    ),
-  );
-  if (report.editor_note) {
-    blocks.push(`## ${STR.mdEditorNote}\n\n${report.editor_note}\n`);
-  }
-  if (report.keywords.length > 0) {
-    blocks.push(
-      `## ${STR.mdTodayKeywords}\n\n${report.keywords.map((k) => `\`#${k}\``).join(" ")}\n`,
-    );
-  }
-  return blocks.filter(Boolean).join("\n");
+export function renderMarkdown(report, date) {
+    const blocks = [];
+    blocks.push(`# ${STR.siteTitle} · ${date}\n`);
+    if (report.hero_headline)
+        blocks.push(`> ${report.hero_headline}\n`);
+    if (report.daily_overview) {
+        blocks.push(`## ${STR.mdTodayOverview}\n\n${report.daily_overview}\n`);
+    }
+    blocks.push(renderSectionMarkdown(CATEGORY_DIGEST_LABELS.tech, report.tech_briefs));
+    blocks.push(renderSectionMarkdown(CATEGORY_DIGEST_LABELS.finance, report.finance_briefs));
+    blocks.push(renderSectionMarkdown(CATEGORY_DIGEST_LABELS.politics, report.politics_briefs));
+    if (report.editor_note) {
+        blocks.push(`## ${STR.mdEditorNote}\n\n${report.editor_note}\n`);
+    }
+    if (report.keywords.length > 0) {
+        blocks.push(`## ${STR.mdTodayKeywords}\n\n${report.keywords.map((k) => `\`#${k}\``).join(" ")}\n`);
+    }
+    return blocks.filter(Boolean).join("\n");
 }

@@ -62,12 +62,17 @@ jobs:
           DAYS_VAL="${REPORT_DAYS:-*}"
           NOW_HOUR=$(TZ="$TZ_VAL" date +%-H)
           NOW_DOW=$(TZ="$TZ_VAL" date +%w)
+          NOW_PRINT=$(TZ="$TZ_VAL" date '+%Y-%m-%d %H:%M %Z')
+          echo "Now in $TZ_VAL: $NOW_PRINT (hour=$NOW_HOUR, dow=$NOW_DOW)"
+          echo "Configured REPORT_HOUR='$HOURS_VAL', REPORT_DAYS='$DAYS_VAL'"
+
           hour_match=false
           IFS=',' read -ra HLIST <<< "$HOURS_VAL"
           for h in "${HLIST[@]}"; do
             h_trim="${h// /}"
             if [ "$NOW_HOUR" = "$h_trim" ]; then hour_match=true; break; fi
           done
+
           day_match=false
           if [ "$DAYS_VAL" = "*" ]; then
             day_match=true
@@ -78,9 +83,43 @@ jobs:
               if [ "$NOW_DOW" = "$d_trim" ]; then day_match=true; break; fi
             done
           fi
-          if [ "$hour_match" = true ] && [ "$day_match" = true ]; then
+
+          # Catchup: if day matches but exact hour doesn't, AND we're past
+          # the earliest REPORT_HOUR, AND today's report is missing from
+          # gh-pages → build anyway. This covers GitHub Actions silently
+          # dropping cron triggers (~30% of runs).
+          catchup_match=false
+          if [ "$day_match" = "true" ] && [ "$hour_match" = "false" ]; then
+            earliest_hour=99
+            for h in "${HLIST[@]}"; do
+              h_trim="${h// /}"
+              if [ "$h_trim" -lt "$earliest_hour" ]; then earliest_hour=$h_trim; fi
+            done
+            # Tolerate 1h early to catch pre-hour triggers
+            catchup_threshold=$earliest_hour
+            if [ "$earliest_hour" -gt 0 ]; then catchup_threshold=$((earliest_hour - 1)); fi
+            if [ "$NOW_HOUR" -ge "$catchup_threshold" ]; then
+              TODAY=$(TZ="$TZ_VAL" date +%Y-%m-%d)
+              # Check via gh api (authenticated, reliable)
+              HTTP_CODE=$(gh api "/repos/${GITHUB_REPOSITORY}/contents/${TODAY}?ref=gh-pages" \
+                --jq ".type" 2>/dev/null || echo "404")
+              if [ "$HTTP_CODE" != "dir" ]; then
+                echo "↻ Catchup: today's report ($TODAY) missing from gh-pages — recovering"
+                catchup_match=true
+              else
+                echo "Catchup: today's report already exists — no action"
+              fi
+            fi
+          fi
+
+          if [ "$hour_match" = "true" ] && [ "$day_match" = "true" ]; then
+            echo "✓ Hour+day match — proceeding to build"
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$catchup_match" = "true" ]; then
+            echo "✓ Catchup match — proceeding to build"
             echo "should-run=true" >> "$GITHUB_OUTPUT"
           else
+            echo "✗ No match (hour=$hour_match day=$day_match catchup=$catchup_match)"
             echo "should-run=false" >> "$GITHUB_OUTPUT"
           fi
 
