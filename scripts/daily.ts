@@ -18,6 +18,7 @@ import {
   enrichTrendingSummaries,
   enrichXViralSummaries,
   enrichContentTags,
+  enrichCategorySummary,
   type EnrichInput,
 } from "../lib/ai/enrich";
 import {
@@ -235,8 +236,30 @@ async function enrichAiNews(articles: ArticleInput[], date: string): Promise<voi
  * already in Chinese and skipped.
  */
 async function enrichTrending(articles: ArticleInput[], date: string): Promise<void> {
-  // Enrich Google Trends (English keywords → Chinese)
-  await enrichMergedSubgroup(articles, "trending", "google-trends", enrichTrendingSummaries, date);
+  // Google Trends: dedup by title across all regions, then enrich top 10
+  // (round-robin across 6 regions produces near-identical keywords)
+  const gtSources = sources.filter(
+    (s) => s.category === "trending" && s.subcategory === "google-trends" && s.enabled !== false,
+  );
+  const gtEnabledIds = new Set(gtSources.map((s) => s.id));
+  const gtCandidates = articles.filter((a) => gtEnabledIds.has(a.sourceId));
+  const gtSeen = new Set<string>();
+  const gtDeduped: ArticleInput[] = [];
+  for (const a of gtCandidates) {
+    const key = a.title.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!gtSeen.has(key)) { gtSeen.add(key); gtDeduped.push(a); }
+  }
+  const gtLimit = MERGED_SUBGROUP_LIMITS["trending:google-trends"] ?? 10;
+  const gtTop = gtDeduped.slice(0, gtLimit);
+  if (gtTop.length > 0) {
+    const t0 = Date.now();
+    console.log(`[daily] enriching ${gtTop.length} Google Trends (deduped from ${gtCandidates.length})…`);
+    const summaries = await enrichTrendingSummaries(gtTop);
+    let matched = 0;
+    for (const a of gtTop) { const s = summaries.get(a.url); if (s) { a.summary = s; matched++; } }
+    console.log(`[daily] Trending (google) done in ${((Date.now() - t0) / 1000).toFixed(1)}s, matched ${matched}/${gtTop.length}`);
+  }
+
   // Enrich Reddit popular (English titles → Chinese)
   await enrichMergedSubgroup(articles, "trending", "reddit-trending", enrichTrendingSummaries, date);
   // cn-trending sources (微博热搜, 知乎热榜) are already in Chinese — no enrichment needed
@@ -531,6 +554,29 @@ async function main() {
   console.log(`[daily] batch 2 done in ${((Date.now() - enrichT1) / 1000).toFixed(1)}s`);
   console.log(`[daily] all enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
+  // Category-level AI summaries: one concise overview per category section.
+  // Runs after all article-level enrichment so summaries are available.
+  console.log(`[daily] generating category-level summaries…`);
+  const catSummaries: Record<string, string> = {};
+  const catT0 = Date.now();
+  const CATEGORIES: Array<{ key: string; name: string; filter: (a: ArticleInput) => boolean }> = [
+    { key: "trending", name: "热搜趋势", filter: (a) => a.category === "trending" && !!a.summary },
+    { key: "tech", name: "技术动态", filter: (a) => a.category === "tech" && !!a.summary },
+    { key: "finance", name: "财经要点", filter: (a) => a.category === "finance" && !!a.summary },
+    { key: "politics", name: "国际时政", filter: (a) => a.category === "politics" && !!a.summary },
+  ];
+  await Promise.allSettled(CATEGORIES.map(async (cat) => {
+    const items = articles.filter(cat.filter).slice(0, 30);
+    if (items.length === 0) return;
+    const summary = await enrichCategorySummary(
+      cat.name,
+      items.map((a) => ({ url: a.url, title: a.title, excerpt: a.summary, source: a.source })),
+    );
+    if (summary) catSummaries[cat.key] = summary;
+  }));
+  const catMatched = CATEGORIES.filter((c) => catSummaries[c.key]).length;
+  console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${CATEGORIES.length} sections`);
+
   // Trading signals: Yahoo fetch + indicators + commentary. Non-fatal —
   // if it errors, we still ship the news digest.
   let trading: TradingSection | null = null;
@@ -560,7 +606,7 @@ async function main() {
     JSON.stringify({ date, articles, failedSources }, null, 2),
     "utf8",
   );
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[daily] wrote ${base}.{json,html,md,articles.json}`);

@@ -564,12 +564,15 @@ function renderSubContent(category: Category, sub: SubGroup, isActive: boolean):
 function renderRawCategoryPanel(
   category: Category,
   subs: SubGroup[],
+  categoryKey?: string,
+  categorySummaries?: Record<string, string>,
 ): string {
+  const summaryHtml = categoryKey ? renderCategorySummary(categoryKey, categorySummaries) : "";
   if (subs.length === 0) {
-    return `<p class="empty">${STR.emptyCategory}</p>`;
+    return summaryHtml + `<p class="empty">${STR.emptyCategory}</p>`;
   }
   if (subs.length === 1) {
-    return renderSubContent(category, subs[0], true);
+    return summaryHtml + renderSubContent(category, subs[0], true);
   }
   const subTabs = subs
     .map((s, i) => {
@@ -631,20 +634,32 @@ function renderTagCloud(tags: TagEntry[]): string {
   if (tags.length === 0) return "";
   const heading = REPORT_LOCALE === "en" ? "Hot Tags" : "热点标签";
   const heatColors = ["tag-heat-0", "tag-heat-1", "tag-heat-2", "tag-heat-3"];
-  const SHOW_LIMIT = 25;
   const allChips = tags.map((t, i) => {
     const cls = heatColors[heatLevel(i, tags.length)];
     return `<span class="tag-cloud-chip ${cls}" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></span>`;
-  });
-  const visibleChips = allChips.slice(0, SHOW_LIMIT);
-  const hiddenChips = allChips.slice(SHOW_LIMIT);
-  const expandBtn = hiddenChips.length > 0
-    ? `<button class="tag-cloud-expand" data-expanded="false">${REPORT_LOCALE === "en" ? `+${hiddenChips.length} more` : `+${hiddenChips.length} 更多`}</button>`
+  }).join("");
+  const expandBtn = tags.length > 1
+    ? `<button class="tag-cloud-expand" data-expanded="false">${REPORT_LOCALE === "en" ? `+${tags.length - 1} more` : `展开`}</button>`
     : "";
   return `<section class="tag-cloud">
     <p class="tag-cloud-heading">${heading}</p>
-    <div class="tag-cloud-body">${visibleChips.join("")}${hiddenChips.length > 0 ? `<span class="tag-cloud-hidden">${hiddenChips.join("")}</span>` : ""}${expandBtn}</div>
+    <div class="tag-cloud-body">
+      <div class="tag-cloud-fade"></div>
+      ${allChips}${expandBtn}
+    </div>
   </section>`;
+}
+
+// ----- category summary -----
+
+function renderCategorySummary(key: string, summaries?: Record<string, string>): string {
+  const text = summaries?.[key];
+  if (!text) return "";
+  const label = REPORT_LOCALE === "en" ? "AI Summary" : "📋 AI 分析";
+  return `<div class="category-summary">
+    <span class="category-summary-eyebrow">${label}</span>
+    <p>${escapeHtml(text)}</p>
+  </div>`;
 }
 
 // ----- top-level renderer -----
@@ -654,6 +669,7 @@ export function renderHtml(
   raw: RawByCategory,
   date: string,
   failedSources?: Array<{ id: string; name: string; reason: string }>,
+  categorySummaries?: Record<string, string>,
 ): string {
   const trading = report.trading;
 
@@ -1208,6 +1224,28 @@ export function renderHtml(
     font-style: italic;
   }
 
+  /* ===== category-level AI summary ===== */
+  .category-summary {
+    margin: 0.75rem 0 1rem;
+    padding: 0.85rem 1.1rem;
+    background: var(--card);
+    border-left: 4px solid var(--link);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--fg-soft);
+  }
+  .category-summary-eyebrow {
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--link);
+    margin-bottom: 0.25rem;
+  }
+  .category-summary p { margin: 0; }
+
   /* ===== tag cloud ===== */
   .tag-cloud {
     margin: 0.5rem 0 1rem;
@@ -1229,6 +1267,26 @@ export function renderHtml(
     flex-wrap: wrap;
     gap: 0.35rem;
     align-items: center;
+    max-height: 2.4em;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    position: relative;
+  }
+  .tag-cloud-body.expanded {
+    max-height: none;
+  }
+  .tag-cloud-fade {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1.2em;
+    background: linear-gradient(transparent, var(--bg-elevated));
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  .tag-cloud-body.expanded .tag-cloud-fade {
+    opacity: 0;
   }
   .tag-cloud-chip {
     display: inline-flex;
@@ -1669,17 +1727,17 @@ export function renderHtml(
   </nav>
 
   <section class="panel${raw.trending.length > 0 ? " active" : ""}" data-panel="trending">
-    ${renderRawCategoryPanel("trending", raw.trending)}
+    ${renderRawCategoryPanel("trending", raw.trending, "trending", categorySummaries)}
   </section>
   <section class="panel${raw.trending.length > 0 ? "" : " active"}" data-panel="tech">
-    ${renderRawCategoryPanel("tech", techMainSubs)}
+    ${renderRawCategoryPanel("tech", techMainSubs, "tech", categorySummaries)}
   </section>
   ${trading ? `<section class="panel" data-panel="trading">${renderTradingPanel(trading)}</section>` : ""}
   <section class="panel" data-panel="politics">
-    ${renderRawCategoryPanel("politics", raw.politics)}
+    ${renderRawCategoryPanel("politics", raw.politics, "politics", categorySummaries)}
   </section>
   <section class="panel" data-panel="finance">
-    ${renderRawCategoryPanel("finance", raw.finance)}
+    ${renderRawCategoryPanel("finance", raw.finance, "finance", categorySummaries)}
   </section>
   ${techCommunitySubs.length > 0 ? `<section class="panel" data-panel="community">
     ${renderRawCategoryPanel("tech", techCommunitySubs)}
@@ -1738,17 +1796,16 @@ export function renderHtml(
       });
     });
   });
-  // Tag cloud: expand/collapse hidden tags
+  // Tag cloud: expand/collapse — show only one row, click to reveal all
   document.querySelectorAll('.tag-cloud-expand').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      var hidden = btn.parentElement.querySelector('.tag-cloud-hidden');
-      if (!hidden) return;
+      var body = btn.parentElement;
+      if (!body) return;
       var expanded = btn.dataset.expanded === 'true';
       btn.dataset.expanded = expanded ? 'false' : 'true';
-      hidden.classList.toggle('expanded', !expanded);
-      var extra = hidden.querySelectorAll('.tag-cloud-chip').length;
+      body.classList.toggle('expanded', !expanded);
       btn.textContent = expanded
-        ? ('+' + extra + ' \\u66f4\\u591a')
+        ? ('\\u5c55\\u5f00')
         : ('\\u2212 \\u6536\\u8d77');
     });
   });

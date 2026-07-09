@@ -255,11 +255,13 @@ const TRENDING_SYSTEM_PROMPT_ZH = `你是一名中文编辑，负责将英文热
 输入：每条包含 url、title（英文关键词或标题）、excerpt（可能的说明文字）和 source（来源名称）。
 
 任务：
-  - 对于 Google Trends 关键词：将英文关键词翻译为中文，并在摘要中说明该词为何热门（如能推断）
+  - 对于 Google Trends 关键词：将英文关键词翻译为中文，并在摘要中说明该词为何热门（如能推断）。即使 excerpt 为空，也至少有"<中文翻译>热搜词"这样的翻译说明
   - 对于 Reddit 热门帖子：将英文标题翻译为中文，并根据 excerpt 写 30-60 字中文摘要
   - 原文已含中文的条目，直接凝练摘要
   - 必须保留关键数字、人名、产品名、地名
   - 中性事实陈述
+
+**重要：必须为输入的每一条目都生成 summary，不允许遗漏。** 即使只有标题没有说明文字，也要至少给出中文翻译。
 
 输出严格 JSON 对象，不要 markdown 包裹：
 {
@@ -682,4 +684,85 @@ export async function enrichContentTags(
   }
 
   return result;
+}
+
+// ----- Category-level summaries -----
+
+const CATEGORY_SUMMARY_SYSTEM_PROMPT_ZH = (categoryName: string) => `你是一名中文编辑，为「${categoryName}」板块撰写今日要点总结。
+
+输入：该板块下所有条目，每条有标题、来源、AI摘要和标签。
+
+任务：写一段 80-150 字的今日要点总结：
+  - 提炼 2-3 个最重要的主题或趋势
+  - 指出该板块今日的总体方向（如：科技板块以 AI 发布为主、财经板块以加息预期为主等）
+  - 语言精炼，不说废话
+  - 只基于输入内容，不要编造
+
+输出严格 JSON 对象，不要 markdown：
+{
+  "summary": "<80-150 字总结>"
+}`;
+
+const CATEGORY_SUMMARY_SYSTEM_PROMPT_EN = (categoryName: string) => `You are an editor writing a daily highlights summary for the "${categoryName}" section.
+
+Input: all items in this section, each with title, source, AI summary and tags.
+
+Task: write an 80-150 word highlights summary:
+  - Extract 2-3 most important themes or trends
+  - Note the overall direction (e.g., "Tech dominated by AI releases", "Finance focused on rate hike expectations")
+  - Concise, no filler
+  - Based only on the input content
+
+Output STRICTLY a JSON object, no markdown:
+{
+  "summary": "<80-150 word summary>"
+}`;
+
+const CATEGORY_SUMMARY_PROMPTS =
+  REPORT_LOCALE === "en" ? CATEGORY_SUMMARY_SYSTEM_PROMPT_EN : CATEGORY_SUMMARY_SYSTEM_PROMPT_ZH;
+
+/**
+ * Generate a category-level AI summary/highlights for a given category.
+ * Takes all articles in the category (with their AI summaries already set),
+ * calls the LLM once to produce a concise 80-150 word/char overview.
+ *
+ * Returns the summary text, or empty string on failure.
+ */
+export async function enrichCategorySummary(
+  categoryName: string,
+  items: EnrichInput[],
+): Promise<string> {
+  if (items.length === 0) return "";
+  try {
+    const langHeader =
+      REPORT_LOCALE === "en"
+        ? "**Output language: ENGLISH ONLY.**"
+        : "**输出语言：仅中文。**";
+    const userPrompt = [
+      langHeader,
+      "",
+      `以下为今日「${categoryName}」板块的所有条目（共 ${items.length} 条）：`,
+      JSON.stringify(items.map((it) => ({
+        url: it.url,
+        title: it.title,
+        source: it.source ?? "",
+        summary: (it.excerpt ?? "").slice(0, 200),
+      }))),
+      "",
+      '请输出 {"summary": "<总结内容>"}',
+    ].join("\n");
+
+    const { text } = await runLlm({
+      systemPrompt: CATEGORY_SUMMARY_PROMPTS(categoryName),
+      userPrompt,
+      timeoutMs: 30_000,
+    });
+    const cleaned = extractJson(text);
+    const parsed: { summary?: string } = JSON.parse(cleaned);
+    return (parsed.summary ?? "").trim();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] category summary for "${categoryName}" failed: ${msg}`);
+    return "";
+  }
 }
