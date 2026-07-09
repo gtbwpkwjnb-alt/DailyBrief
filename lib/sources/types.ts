@@ -46,6 +46,12 @@ export interface SourceDef {
    * Omit or leave empty to return all items unfiltered.
    */
   keywords?: string[];
+  /**
+   * Quality priority score (1-5, 5=highest). Used by the pipeline to
+   * fetch high-quality sources first and prioritize enrichment.
+   * Default: 3 for most sources, 5 for top-tier sources, 1 for disabled.
+   */
+  priority?: number;
 }
 
 export interface RawArticle {

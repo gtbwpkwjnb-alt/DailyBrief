@@ -662,6 +662,24 @@ function renderCategorySummary(key: string, summaries?: Record<string, string>):
   </div>`;
 }
 
+// ----- AI review panel -----
+
+function reviewHtml(
+  review?: { passed: boolean; summary: string; issues: string[]; suggestions: string[] },
+): string {
+  if (!review || !review.summary) return "";
+  const cls = review.passed ? "passed" : "has-issues";
+  const label = REPORT_LOCALE === "en" ? "AI Quality Review" : "📋 质量审核";
+  const issueItems = (review.issues ?? []).map(
+    (i) => `<p class="review-issue">⚠ ${escapeHtml(i)}</p>`,
+  ).join("");
+  return `<section class="review-panel ${cls}">
+    <span class="review-eyebrow">${label}</span>
+    <p class="review-text">${escapeHtml(review.summary)}</p>
+    ${issueItems}
+  </section>`;
+}
+
 // ----- top-level renderer -----
 
 export function renderHtml(
@@ -670,6 +688,7 @@ export function renderHtml(
   date: string,
   failedSources?: Array<{ id: string; name: string; reason: string }>,
   categorySummaries?: Record<string, string>,
+  review?: { passed: boolean; summary: string; issues: string[]; suggestions: string[] },
 ): string {
   const trading = report.trading;
 
@@ -692,7 +711,7 @@ export function renderHtml(
 	    politics: sumItems(raw.politics),
 	    community: sumItems(techCommunitySubs),
 	  };
-	  const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
+  const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
   const failedHtml = failedSources && failedSources.length > 0
     ? `<section class="failed-sources">
     <p class="failed-sources-heading">${REPORT_LOCALE === "en" ? "Failed Sources" : "抓取失败源"}</p>
@@ -1696,6 +1715,33 @@ export function renderHtml(
   .trading-risk .eyebrow { display: block; margin-bottom: 0.3rem; }
   .trading-risk p { margin: 0; font-size: 0.82rem; line-height: 1.7; color: var(--fg-soft); }
 
+  .review-panel {
+    margin: 0.75rem 0 1rem;
+    padding: 0.85rem 1.1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--muted);
+    border-radius: var(--radius);
+  }
+  .review-panel.passed { border-left-color: #16a34a; }
+  .review-panel.has-issues { border-left-color: #d97706; }
+  .review-eyebrow {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+  .review-text { margin: 0; font-size: 0.85rem; line-height: 1.7; color: var(--fg-soft); }
+  .review-issue {
+    font-size: 0.82rem;
+    color: #d97706;
+    margin: 0.2rem 0;
+    padding-left: 0.5rem;
+    border-left: 2px solid #d97706;
+  }
+
   footer {
     margin-top: 3rem;
     border-top: 1px solid var(--rule);
@@ -1716,6 +1762,8 @@ export function renderHtml(
   ${tagCloudHtml}
 
   ${failedHtml}
+
+  ${reviewHtml(review)}
 
   <nav class="tabs" role="tablist">
     ${raw.trending.length > 0 ? `<button class="tab active" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}

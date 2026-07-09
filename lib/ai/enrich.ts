@@ -766,3 +766,287 @@ export async function enrichCategorySummary(
     return "";
   }
 }
+
+// ----- Consolidated enrichment (replaces 8 separate calls) -----
+
+const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资讯进行中文优化处理。
+
+输入：每条包含 url、title、excerpt（可能的原文）、source（来源）和 category（分类）。
+
+任务：对每一条目执行以下三项操作：
+
+**1. 精炼摘要（必需）**
+- 如果原文是英文 → 翻译为中文精炼摘要（50-90字），保留关键数字、人名、机构名、地名
+- 如果原文是中文 → 直接精炼摘要（50-90字），提高信息密度
+- GitHub 项目 → 说明项目做什么、用什么技术、解决什么问题
+- X 推文 → 不照搬标题党 title，以内容为准确认博主的分享点
+- 论文 → 说明解决的问题、方法、关键结果
+- Google 热搜关键词 → 翻译为中文并说明为何热门（即使无说明也至少有"XX热搜词"）
+- 即使信息不足，也至少有标题的中文翻译，**不允许遗漏任何条目**
+
+**2. 内容标签（必需）**
+- 分配 3-5 个内容标签，前 1-2 个为基础分类（政治/经济/科技/体育/娱乐/军事/社会/教育/健康/环境/国际/财经/文化），后 2-3 个为具体内容标签
+- 标签从广到窄排序
+- 纯中文，不需要空格
+
+**3. 重要度评分（必需）**
+- 1-10 分，10 为最重要。基于：新闻影响力、时效性、与目标读者的相关性
+
+输出严格 JSON 对象，不要 markdown 包裹：
+{
+  "items": [
+    {
+      "url": "<原 url，精确复制>",
+      "summary": "<50-90 字中文精炼摘要>",
+      "tags": ["科技", "AI", "开源模型"],
+      "importance": 7
+    },
+    ...
+  ]
+}
+
+**引号规则**：summary 内的引用用中文全角引号「」，绝不使用英文双引号。标签不加引号。`;
+
+const CONSOLIDATED_SYSTEM_PROMPT_EN = `You are an AI editor producing English-optimized news summaries.
+
+Input: each item has url, title, excerpt, source, and category.
+
+Task: for each item, do ALL three:
+
+**1. Refined summary (required)**
+- If content is non-English → translate key info to English (50-90 words)
+- If already English → condense to higher density (50-90 words)
+- Keep: key numbers, people/institution names, locations
+- GitHub repos → what it does, tech, problem solved
+- X posts → ignore clickbait title, extract the actual claim
+- Papers → problem, method, key result
+- Google Trends → explain why trending (or just translate)
+- **Do NOT skip any item. Every item must have a summary.**
+
+**2. Content tags (required)**
+- 3-5 tags per item: 1-2 base category (Politics/Economy/Technology/Sports/Entertainment/Military/Society/Education/Health/Environment/International/Finance/Culture) + 2-3 specific tags
+- Order: broad to narrow
+
+**3. Importance score (required)**
+- 1-10, 10 = most important. Based on: impact, timeliness, relevance
+
+Output STRICTLY a JSON object, no markdown:
+{
+  "items": [
+    {
+      "url": "<exact url from input>",
+      "summary": "<50-90 word English summary>",
+      "tags": ["Technology", "AI", "open-source"],
+      "importance": 7
+    },
+    ...
+  ]
+}
+
+**Quote rule**: Use single quotes or curly quotes inside summaries — never raw double quotes. No quotes on tags.`;
+
+const CONSOLIDATED_PROMPTS =
+  REPORT_LOCALE === "en" ? CONSOLIDATED_SYSTEM_PROMPT_EN : CONSOLIDATED_SYSTEM_PROMPT_ZH;
+
+export interface ConsolidatedItem {
+  url: string;
+  summary: string;
+  tags: string[];
+  importance: number;
+}
+
+export interface ConsolidatedResult {
+  items: ConsolidatedItem[];
+}
+
+/**
+ * One-pass enrichment for a batch of articles in the same category.
+ * Replaces: enrichTrendingSummaries + enrichFinanceNewsSummaries +
+ * enrichPoliticsSummaries + enrichGithubTrendingSummaries +
+ * enrichTrendingPapersSummaries + enrichXViralSummaries +
+ * enrichAiNews + enrichContentTags.
+ *
+ * Single LLM call handles: translation, refinement, tagging, and importance scoring.
+ */
+export async function consolidatedEnrich(
+  categoryLabel: string,
+  items: EnrichInput[],
+): Promise<Map<string, { summary: string; tags: string[]; importance: number }>> {
+  if (items.length === 0) return new Map();
+
+  const langHeader =
+    REPORT_LOCALE === "en"
+      ? "**Output language: ENGLISH ONLY.** Every summary must be in English."
+      : "**输出语言：仅中文。** 每个 summary 必须全部是中文。";
+
+  const userPrompt = [
+    langHeader,
+    "",
+    `以下为今日「${categoryLabel}」板块的 ${items.length} 条条目：`,
+    JSON.stringify(items.map((it) => ({
+      url: it.url,
+      title: it.title,
+      excerpt: (it.excerpt ?? "").slice(0, 250),
+      source: it.source ?? "",
+      category: categoryLabel,
+    }))),
+    "",
+    `请输出 {"items": [{"url": "...", "summary": "...", "tags": [...], "importance": N}, ...]}`,
+    `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
+  ].join("\n");
+
+  // Attempt 1
+  try {
+    return await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] consolidated "${categoryLabel}" attempt 1 failed: ${msg} — retrying in 10s…`);
+  }
+
+  // Retry after 10s
+  await new Promise((r) => setTimeout(r, 10_000));
+  try {
+    return await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] consolidated "${categoryLabel}" attempt 2 also failed: ${msg}`);
+  }
+
+  return new Map();
+}
+
+async function runConsolidatedOnce(
+  items: EnrichInput[],
+  systemPrompt: string,
+  userPrompt: string,
+  scope: string,
+): Promise<Map<string, { summary: string; tags: string[]; importance: number }>> {
+  const result = new Map<string, { summary: string; tags: string[]; importance: number }>();
+
+  const { text } = await runLlm({
+    systemPrompt,
+    userPrompt,
+    timeoutMs: 120_000, // 2 min for large batches
+  });
+  const cleaned = extractJson(text);
+
+  let parsed: ConsolidatedResult;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    parsed = JSON.parse(jsonrepair(cleaned));
+  }
+
+  for (const item of parsed.items ?? []) {
+    if (item.url && item.summary) {
+      result.set(item.url, {
+        summary: item.summary.trim(),
+        tags: (item.tags ?? []).map((t) => t.trim()).filter(Boolean),
+        importance: typeof item.importance === "number" ? item.importance : 5,
+      });
+    }
+  }
+
+  // Diagnostic for undercount
+  if (result.size < items.length / 2 && items.length >= 3) {
+    try {
+      const fs = await import("node:fs");
+      fs.mkdirSync("logs", { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const tag = scope.replace(/[^a-z0-9]/gi, "-");
+      fs.writeFileSync(
+        `logs/enrich-consolidated-undercount-${tag}-${ts}.txt`,
+        `scope=${scope}\nrequested=${items.length}\nreturned=${result.size}\n\n--- raw LLM output ---\n${text}`,
+        "utf8",
+      );
+	      console.warn(`[enrich] consolidated "${scope}": undercount ${result.size}/${items.length}`);
+	    } catch { /* non-fatal */ }
+	  }
+
+	  return result;
+	}
+
+// ----- AI Review: quality check before publishing -----
+
+const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负责审阅即将发布的日报，确保内容质量。
+
+输入：今日日报的摘要结构，包含各板块的条目（标题、来源、AI摘要、标签、重要度）。
+
+审核要点：
+1. **覆盖度**：各板块（热搜趋势/技术动态/财经要点/国际时政）是否都有内容？是否有明显缺失的领域？
+2. **质量**：摘要是否精炼、信息密度是否足够、是否有明显错误或编造内容？
+3. **多样性**：信息来源是否多样化？是否过度依赖某几个源？
+4. **重点突出**：重要度高的条目是否正确突出了？
+5. **改进建议**：如果有改进空间，给出具体建议。
+
+输出严格 JSON 对象：
+{
+  "passed": true/false,
+  "summary": "<50-100 字的整体评价>",
+  "issues": ["问题1", "问题2", ...],
+  "suggestions": ["建议1", "建议2", ...]
+}
+
+如果全部合格，issues 和 suggestions 可以为空数组。`;
+
+const AI_REVIEW_SYSTEM_PROMPT_EN = `You are a daily report quality reviewer. Review the content before publishing.
+
+Check:
+1. **Coverage**: Does each section have content? Any obvious gaps?
+2. **Quality**: Are summaries concise and accurate? Any fabricated content?
+3. **Diversity**: Are sources diverse? Over-reliance on a few sources?
+4. **Prioritization**: Are high-importance items properly highlighted?
+5. **Improvements**: Specific suggestions for improvement.
+
+Output STRICTLY JSON:
+{
+  "passed": true/false,
+  "summary": "<50-100 word overall assessment>",
+  "issues": ["issue1", "issue2", ...],
+  "suggestions": ["suggestion1", ...]
+}
+
+Empty arrays if all good.`;
+
+const AI_REVIEW_PROMPTS =
+  REPORT_LOCALE === "en" ? AI_REVIEW_SYSTEM_PROMPT_EN : AI_REVIEW_SYSTEM_PROMPT_ZH;
+
+export interface ReviewResult {
+  passed: boolean;
+  summary: string;
+  issues: string[];
+  suggestions: string[];
+}
+
+/**
+ * Final quality check before publishing.
+ * Reviews the rendered report for coverage, quality, diversity, and priorities.
+ */
+export async function aiReview(
+  categorySummary: string,
+): Promise<ReviewResult> {
+  try {
+    const { text } = await runLlm({
+      systemPrompt: AI_REVIEW_PROMPTS,
+      userPrompt: `请审核以下日报内容：\n\n${categorySummary}\n\n请输出 JSON 格式审核报告。`,
+      timeoutMs: 30_000,
+    });
+    const cleaned = extractJson(text);
+    let parsed: ReviewResult;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = JSON.parse(jsonrepair(cleaned));
+    }
+    return {
+      passed: parsed.passed ?? true,
+      summary: parsed.summary ?? "",
+      issues: parsed.issues ?? [],
+      suggestions: parsed.suggestions ?? [],
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[enrich] AI review failed: ${msg}`);
+    return { passed: true, summary: "审核跳过（LLM调用失败）", issues: [], suggestions: [] };
+  }
+}

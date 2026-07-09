@@ -19,7 +19,10 @@ import {
   enrichXViralSummaries,
   enrichContentTags,
   enrichCategorySummary,
+  consolidatedEnrich,
+  aiReview,
   type EnrichInput,
+  type ReviewResult,
 } from "../lib/ai/enrich";
 import {
   groupRaw,
@@ -97,13 +100,17 @@ function writeTagCache(date: string, map: Map<string, string[]>): void {
 
 /**
  * Fetch all enabled sources with concurrency control.
+ * Sources sorted by priority descending (high-priority sources fetched first).
  * Serial fetching of 50+ sources means worst-case ~13 min (15s timeout × 54).
  * Parallel batches of 10 cut that to ~2 min worst-case.
  */
 async function fetchAll(batchSize = 5): Promise<{ articles: ArticleInput[]; failedSources: Array<{ id: string; name: string; reason: string }> }> {
   const articles: ArticleInput[] = [];
   const failedSources: Array<{ id: string; name: string; reason: string }> = [];
-  const enabled = sources.filter((s) => s.enabled !== false);
+  // Sort by priority descending so best sources are fetched first
+  const enabled = sources
+    .filter((s) => s.enabled !== false)
+    .sort((a, b) => (b.priority ?? 3) - (a.priority ?? 3));
   for (let i = 0; i < enabled.length; i += batchSize) {
     const batch = enabled.slice(i, i + batchSize);
     const results = await Promise.allSettled(
@@ -512,23 +519,19 @@ async function runTrading(): Promise<TradingSection | null> {
 }
 
 async function main() {
-  // Fail fast on misconfigured backend before we spend 30s fetching
-  // 500+ articles only to discover the LLM has no credentials.
+  // Phase 0: Validate LLM credentials before wasting time
   validateBackendCredentials();
 
   const date = todayKey();
-  console.log(`[daily] ${date} — fetching sources…\n`);
+
+  // Phase 1+2+3: Fetch all sources (with priority-based ordering),
+  // then globally dedup by URL + title
+  console.log(`[daily] ${date} — fetching sources (priority order)…\n`);
   const { articles, failedSources } = await fetchAll();
   console.log(`\n[daily] total articles: ${articles.length}, failed sources: ${failedSources.length}`);
-  if (articles.length === 0) {
-    throw new Error("no articles fetched — aborting");
-  }
+  if (articles.length === 0) throw new Error("no articles fetched — aborting");
 
-  // Global dedup: remove duplicate articles across all sources (and across
-  // categories). Two passes:
-  //   1. URL dedup — exact URL match, always safe.
-  //   2. Title dedup — normalized title match, keeps first occurrence.
-  // Priority order follows registry order (first-registered source wins).
+  // Global dedup: URL exact match + title normalized match
   {
     const seenUrl = new Set<string>();
     const seenTitle = new Set<string>();
@@ -543,94 +546,100 @@ async function main() {
       deduped.push(a);
     }
     const removed = articles.length - deduped.length;
-    if (removed > 0) console.log(`[daily] global dedup removed ${removed} duplicates (${articles.length} → ${deduped.length})`);
+    if (removed > 0) console.log(`[daily] global dedup removed ${removed} (${articles.length} → ${deduped.length})`);
     articles.length = 0;
     articles.push(...deduped);
   }
 
-  // Enrich in two parallel batches to cut total wall-clock time.
-  //
-  // Batch 1 (independent, ~5 concurrent LLM calls):
-  //   GH Trending, Papers, Finance, Politics, AI News
-  // Batch 2 (depends on batch 1 for tag coverage):
-  //   Trending (Google Trends + Reddit), X Viral, Tags
-  //
-  // Previously these ran serially (8 calls × up to 80s each = 640s worst-case).
-  // Now batch 1 takes ~80s, batch 2 takes ~80s → ~160s total.
-  console.log(`[daily] enriching batch 1 (GH + Papers + Finance + Politics + AI News)…`);
+  // Phase 4: Consolidated AI optimization — one LLM call per category.
+  // Replaces 8 separate enrich calls (GH, Papers, Finance, Politics,
+  // Trends, Reddit, X Viral, Tags) with 4 category-level calls.
+  // Each call handles: translation (en→zh), refinement, tagging, importance.
+  console.log(`[daily] consolidated AI enrichment (4 categories)…`);
   const enrichT0 = Date.now();
-  await Promise.allSettled([
-    enrichGhTrending(articles, date),
-    enrichTrendingPapers(articles, date),
-    enrichFinanceNews(articles, date),
-    enrichPolitics(articles, date),
-    enrichAiNews(articles, date),
-  ]);
-  console.log(`[daily] batch 1 done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
-
-  console.log(`[daily] enriching batch 2 (Trending + XViral + Tags)…`);
-  const enrichT1 = Date.now();
-  await Promise.allSettled([
-    enrichTrending(articles, date),
-    enrichXViral(articles, date),
-    enrichTags(articles, date),
-  ]);
-  console.log(`[daily] batch 2 done in ${((Date.now() - enrichT1) / 1000).toFixed(1)}s`);
-  console.log(`[daily] all enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
-
-  // Category-level AI summaries: one concise overview per category section.
-  // Runs after all article-level enrichment so summaries are available.
-  console.log(`[daily] generating category-level summaries…`);
-  const catSummaries: Record<string, string> = {};
-  const catT0 = Date.now();
-  const CATEGORIES: Array<{ key: string; name: string; filter: (a: ArticleInput) => boolean }> = [
-    { key: "trending", name: "热搜趋势", filter: (a) => a.category === "trending" && !!a.summary },
-    { key: "tech", name: "技术动态", filter: (a) => a.category === "tech" && !!a.summary },
-    { key: "finance", name: "财经要点", filter: (a) => a.category === "finance" && !!a.summary },
-    { key: "politics", name: "国际时政", filter: (a) => a.category === "politics" && !!a.summary },
+  const CATEGORY_CONFIG = [
+    { key: "trending", label: "热搜趋势", filter: (a: ArticleInput) => a.category === "trending" },
+    { key: "tech",     label: "技术动态", filter: (a: ArticleInput) => a.category === "tech" },
+    { key: "finance",  label: "财经要点", filter: (a: ArticleInput) => a.category === "finance" },
+    { key: "politics", label: "国际时政", filter: (a: ArticleInput) => a.category === "politics" },
   ];
-  await Promise.allSettled(CATEGORIES.map(async (cat) => {
-    const items = articles.filter(cat.filter).slice(0, 30);
+  // Limit per category to avoid LLM token overflow (most categories have ~100-300 items)
+  const CATEGORY_ITEM_LIMIT = 80;
+  await Promise.allSettled(CATEGORY_CONFIG.map(async (cfg) => {
+    const items = articles.filter(cfg.filter).slice(0, CATEGORY_ITEM_LIMIT);
     if (items.length === 0) return;
-    const summary = await enrichCategorySummary(
-      cat.name,
-      items.map((a) => ({ url: a.url, title: a.title, excerpt: a.summary, source: a.source })),
+    const t1 = Date.now();
+    const results = await consolidatedEnrich(
+      cfg.label,
+      items.map((a) => ({ url: a.url, title: a.title, excerpt: a.summary ?? a.excerpt, source: a.source })),
     );
-    if (summary) catSummaries[cat.key] = summary;
+    let matched = 0;
+    for (const a of items) {
+      const r = results.get(a.url);
+      if (r) { a.summary = r.summary; a.tags = r.tags; matched++; }
+    }
+    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${items.length} enriched in ${((Date.now()-t1)/1000).toFixed(1)}s`);
   }));
-  const catMatched = CATEGORIES.filter((c) => catSummaries[c.key]).length;
-  console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${CATEGORIES.length} sections`);
+  console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
-  // Trading signals: Yahoo fetch + indicators + commentary. Non-fatal —
-  // if it errors, we still ship the news digest.
+  // Phase 5: Trading signals (optional, non-fatal)
   let trading: TradingSection | null = null;
   try {
     trading = await runTrading();
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[daily] trading section failed: ${msg}`);
+    console.warn(`[daily] trading section failed: ${e instanceof Error ? e.message : e}`);
   }
 
+  // Phase 6: Generate digest (hero headlines + briefs + keywords)
   console.log(`[daily] generating digest with ${getModelTag()}…`);
-  const t0 = Date.now();
+  const digestT0 = Date.now();
   const { report } = await generateDailyReport(articles);
   if (trading) report.trading = trading;
-  console.log(`[daily] digest ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  console.log(`[daily] digest ready in ${((Date.now() - digestT0) / 1000).toFixed(1)}s`);
 
   const dateDir = path.join(OUTPUT_DIR, date);
   fs.mkdirSync(dateDir, { recursive: true });
   const base = path.join(dateDir, date);
   const raw = groupRaw(articles, sources);
+
+  // Phase 7: Category-level AI summaries
+  console.log(`[daily] generating category summaries…`);
+  const catSummaries: Record<string, string> = {};
+  const catT0 = Date.now();
+  await Promise.allSettled(CATEGORY_CONFIG.map(async (cfg) => {
+    const items = articles.filter((a) => cfg.filter(a) && !!a.summary).slice(0, 30);
+    if (items.length === 0) return;
+    const summary = await enrichCategorySummary(
+      cfg.label,
+      items.map((a) => ({ url: a.url, title: a.title, excerpt: a.summary, source: a.source })),
+    );
+    if (summary) catSummaries[cfg.key] = summary;
+  }));
+  const catMatched = CATEGORY_CONFIG.filter((c) => catSummaries[c.key]).length;
+  console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${CATEGORY_CONFIG.length}`);
+
+  // Phase 8: AI Review — final quality check before publishing
+  console.log(`[daily] running AI quality review…`);
+  const reviewT0 = Date.now();
+  const reviewInput = CATEGORY_CONFIG.map((cfg) => {
+    const items = articles.filter((a) => cfg.filter(a) && !!a.summary).slice(0, 5);
+    const lines = items.map((a) => `  - [${a.source}] ${a.title}`);
+    return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
+  }).join("\n\n");
+  const review: ReviewResult = await aiReview(reviewInput);
+  console.log(`[daily] AI review done in ${((Date.now() - reviewT0) / 1000).toFixed(1)}s — ${review.passed ? "✅ PASSED" : "⚠️ ISSUES FOUND"}`);
+  if (review.issues.length > 0) {
+    for (const issue of review.issues) console.warn(`  [review] ${issue}`);
+  }
+
+  // Write output files
   fs.writeFileSync(`${base}.json`, JSON.stringify(report, null, 2), "utf8");
-  // Sidecar with all fetched articles + LLM-attached summary, so
-  // scripts/render.ts can rebuild HTML/MD for UI iteration without
-  // re-fetching or re-calling the LLM.
   fs.writeFileSync(
     `${base}-articles.json`,
     JSON.stringify({ date, articles, failedSources }, null, 2),
     "utf8",
   );
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[daily] wrote ${base}.{json,html,md,articles.json}`);
