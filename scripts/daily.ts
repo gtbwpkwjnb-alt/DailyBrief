@@ -139,41 +139,44 @@ async function fetchAll(batchSize = 10): Promise<{ articles: ArticleInput[]; fai
       }
     }
   }
-  // Retry failed sources once after 5s delay
+  // Retry failed sources once after 5s delay, batched to respect concurrency limits
   if (failedSources.length > 0) {
     console.log(`[daily] retrying ${failedSources.length} failed sources in 5s…`);
     await new Promise((r) => setTimeout(r, 5000));
-    const retryPromises = failedSources.map(async (f) => {
-      const source = sources.find((s) => s.id === f.id);
-      if (!source || source.enabled === false) return null;
-      try {
-        const items = await fetchSource(source);
-        return { source, items };
-      } catch (e) {
-        return null;
-      }
-    });
-    const retryResults = await Promise.allSettled(retryPromises);
+    const retryBatchSize = Math.min(batchSize, 5); // cap retry concurrency lower than first round
     let recovered = 0;
-    for (const res of retryResults) {
-      if (res.status === "fulfilled" && res.value) {
-        const { source, items } = res.value;
-        console.log(`  ${source.id.padEnd(20)} RETRY OK — ${items.length} items`);
-        articles.push(...items.map((it) => ({ ...it, source: source.name })));
-        recovered++;
+    for (let i = 0; i < failedSources.length; i += retryBatchSize) {
+      const batch = failedSources.slice(i, i + retryBatchSize);
+      const retryResults = await Promise.allSettled(
+        batch.map(async (f) => {
+          const source = sources.find((s) => s.id === f.id);
+          if (!source || source.enabled === false) return null;
+          try {
+            const items = await fetchSource(source);
+            return { source, items };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const res of retryResults) {
+        if (res.status === "fulfilled" && res.value) {
+          const { source, items } = res.value;
+          console.log(`  ${source.id.padEnd(20)} RETRY OK — ${items.length} items`);
+          articles.push(...items.map((it) => ({ ...it, source: source.name })));
+          recovered++;
+        }
       }
     }
-    // Update failedSources list: remove recovered ones
+    // Update failedSources list: remove recovered ones by checking which
+    // sources now have articles in the result set
     if (recovered > 0) {
-      const recoveredIds = new Set(
-        retryResults
-          .filter((r) => r.status === "fulfilled" && r.value !== null)
-          .map((r) => (r as PromiseFulfilledResult<{ source: { id: string }; items: unknown[] }>).value.source.id),
-      );
+      const articleSourceIds = new Set(articles.map((a) => a.sourceId));
+      const before = failedSources.length;
       for (let i = failedSources.length - 1; i >= 0; i--) {
-        if (recoveredIds.has(failedSources[i].id)) failedSources.splice(i, 1);
+        if (articleSourceIds.has(failedSources[i].id)) failedSources.splice(i, 1);
       }
-      console.log(`[daily] retry recovered ${recovered}/${recovered + failedSources.length} sources`);
+      console.log(`[daily] retry recovered ${recovered}/${before} sources`);
     }
   }
 

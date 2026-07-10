@@ -176,7 +176,7 @@ const SUBCATEGORY_ORDER: Partial<Record<Category, string[]>> = {
   // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
   // overseas-community (Hacker News / r/stocks).
 	  trending: ["google-trends", "cn-trending", "reddit-trending"],
-  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "cn-community", "overseas-community"],
+  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "blog-weekly", "cn-community", "overseas-community"],
   finance: ["news"],
   politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
 };
@@ -258,6 +258,7 @@ export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
 	  "trending:cn-trending": 10,
 	  "trending:reddit-trending": 10,
 	  "tech:ai-news": 15,
+	  "tech:blog-weekly": 10,
 	  "finance:news": 12,
 	  "politics:uk": 15,
 	  "politics:us": 15,
@@ -1813,7 +1814,7 @@ export function renderHtml(
   <header class="report-header">
       <span class="eyebrow">${STR.siteTitle}</span>
       <h1 class="report-title">${date}</h1>
-      <span class="update-time">更新时间: ${new Date().toLocaleString("zh-CN", { timeZone: getReportTz(), hour12: false, hour: "2-digit", minute: "2-digit", month: "2-digit", day: "2-digit" })}</span>
+      <span class="update-time">${REPORT_LOCALE === "en" ? "Updated" : "更新时间"}: ${new Date().toLocaleString(REPORT_LOCALE === "en" ? "en-GB" : "zh-CN", { timeZone: getReportTz(), hour12: false, hour: "2-digit", minute: "2-digit", month: "2-digit", day: "2-digit" })}</span>
       ${process.env.WEB_MODE === "true" ? `<a class="archive-link" href="../archive.html">${STR.archiveLink}</a>` : ""}
   </header>
 
@@ -1880,6 +1881,8 @@ export function renderHtml(
   });
   document.querySelectorAll('.source-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
+      // __all__ has its own dedicated handler below — skip here to avoid double-toggle
+      if (btn.dataset.source === '__all__') return;
       var subContent = btn.closest('.sub-content');
       if (!subContent) return;
       var src = btn.dataset.source;
@@ -1891,21 +1894,29 @@ export function renderHtml(
       });
     });
   });
-  // Smart "All" button for source-tabs: when present, toggles show-all mode.
-  // The "all" tab is keyed by its data-source="__all__" attribute.
+  // Smart "All" button: toggles show-all mode. First click shows every
+  // source-content; second click reverts to first source only.
   document.querySelectorAll('.source-tab[data-source="__all__"]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var subContent = btn.closest('.sub-content');
       if (!subContent) return;
-      var isActive = btn.classList.contains('active');
-      // Toggle: if active → deactivate, show single source; else activate
+      var wasActive = btn.classList.contains('active');
       subContent.querySelectorAll('.source-tab').forEach(function (b) {
-        b.classList.toggle('active', b === btn);
+        b.classList.toggle('active', b === btn ? !wasActive : false);
       });
-      subContent.querySelectorAll('.source-content').forEach(function (p) {
-        // Show all content panels when "all" is active
-        p.classList.toggle('active', !isActive);
-      });
+      var contents = subContent.querySelectorAll('.source-content');
+      if (wasActive) {
+        // Revert to first source only
+        var firstReal = subContent.querySelector('.source-tab:not([data-source="__all__"])');
+        var firstSrc = firstReal ? firstReal.dataset.source : null;
+        contents.forEach(function (p) {
+          p.classList.toggle('active', p.dataset.sourceContent === firstSrc);
+        });
+        if (firstReal) firstReal.classList.add('active');
+      } else {
+        // Show all
+        contents.forEach(function (p) { p.classList.add('active'); });
+      }
     });
   });
   document.querySelectorAll('.trading-group-tab').forEach(function (btn) {
