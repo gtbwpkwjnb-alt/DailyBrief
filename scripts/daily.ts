@@ -104,7 +104,12 @@ function writeTagCache(date: string, map: Map<string, string[]>): void {
  * Serial fetching of 50+ sources means worst-case ~13 min (15s timeout × 54).
  * Parallel batches of 10 cut that to ~2 min worst-case.
  */
-async function fetchAll(batchSize = 5): Promise<{ articles: ArticleInput[]; failedSources: Array<{ id: string; name: string; reason: string }> }> {
+/**
+ * Fetch all enabled sources with concurrency control and retry.
+ * batchSize=10: 10 parallel fetches per batch. With 55 sources ≈ 6 rounds.
+ * Each failed source is retried once after 5s delay.
+ */
+async function fetchAll(batchSize = 10): Promise<{ articles: ArticleInput[]; failedSources: Array<{ id: string; name: string; reason: string }> }> {
   const articles: ArticleInput[] = [];
   const failedSources: Array<{ id: string; name: string; reason: string }> = [];
   // Sort by priority descending so best sources are fetched first
@@ -134,6 +139,44 @@ async function fetchAll(batchSize = 5): Promise<{ articles: ArticleInput[]; fail
       }
     }
   }
+  // Retry failed sources once after 5s delay
+  if (failedSources.length > 0) {
+    console.log(`[daily] retrying ${failedSources.length} failed sources in 5s…`);
+    await new Promise((r) => setTimeout(r, 5000));
+    const retryPromises = failedSources.map(async (f) => {
+      const source = sources.find((s) => s.id === f.id);
+      if (!source || source.enabled === false) return null;
+      try {
+        const items = await fetchSource(source);
+        return { source, items };
+      } catch (e) {
+        return null;
+      }
+    });
+    const retryResults = await Promise.allSettled(retryPromises);
+    let recovered = 0;
+    for (const res of retryResults) {
+      if (res.status === "fulfilled" && res.value) {
+        const { source, items } = res.value;
+        console.log(`  ${source.id.padEnd(20)} RETRY OK — ${items.length} items`);
+        articles.push(...items.map((it) => ({ ...it, source: source.name })));
+        recovered++;
+      }
+    }
+    // Update failedSources list: remove recovered ones
+    if (recovered > 0) {
+      const recoveredIds = new Set(
+        retryResults
+          .filter((r) => r.status === "fulfilled" && r.value !== null)
+          .map((r) => (r as PromiseFulfilledResult<{ source: { id: string }; items: unknown[] }>).value.source.id),
+      );
+      for (let i = failedSources.length - 1; i >= 0; i--) {
+        if (recoveredIds.has(failedSources[i].id)) failedSources.splice(i, 1);
+      }
+      console.log(`[daily] retry recovered ${recovered}/${recovered + failedSources.length} sources`);
+    }
+  }
+
   return { articles, failedSources };
 }
 
@@ -604,11 +647,18 @@ async function main() {
   const base = path.join(dateDir, date);
   const raw = groupRaw(articles, sources);
 
-  // Phase 7: Category-level AI summaries
+  // Phase 7: Category-level AI summaries (including community)
   console.log(`[daily] generating category summaries…`);
   const catSummaries: Record<string, string> = {};
   const catT0 = Date.now();
-  await Promise.allSettled(CATEGORY_CONFIG.map(async (cfg) => {
+  // Build a lookup map for source subcategories
+  const sourceSubcat = new Map(sources.map((s) => [s.id, s.subcategory]));
+  const SUMMARY_CONFIG = [
+    ...CATEGORY_CONFIG,
+    { key: "community", label: "社区讨论", filter: (a: ArticleInput) =>
+      ["cn-community", "overseas-community", "blog-weekly"].includes(sourceSubcat.get(a.sourceId) ?? "") },
+  ];
+  await Promise.allSettled(SUMMARY_CONFIG.map(async (cfg) => {
     const items = articles.filter((a) => cfg.filter(a) && !!a.summary).slice(0, 30);
     if (items.length === 0) return;
     const summary = await enrichCategorySummary(
@@ -617,8 +667,8 @@ async function main() {
     );
     if (summary) catSummaries[cfg.key] = summary;
   }));
-  const catMatched = CATEGORY_CONFIG.filter((c) => catSummaries[c.key]).length;
-  console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${CATEGORY_CONFIG.length}`);
+  const catMatched = SUMMARY_CONFIG.filter((c) => catSummaries[c.key]).length;
+  console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${SUMMARY_CONFIG.length}`);
 
   // Phase 8: AI Review — final quality check before publishing
   console.log(`[daily] running AI quality review…`);

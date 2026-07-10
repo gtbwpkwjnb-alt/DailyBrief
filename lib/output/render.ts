@@ -544,7 +544,7 @@ function renderSourceTabs(
   // label already identifies the dataset. L3 only earns its row when there
   // are ≥2 sources to switch between (e.g. 社区讨论 V2EX vs LinuxDo).
   if (sources.length < 2) return "";
-  return `<nav class="source-tabs">${sources
+  return `<nav class="source-tabs"><button class="source-tab" data-source="__all__" data-sub="${escapeHtml(subId)}" data-cat="${category}">${REPORT_LOCALE === "en" ? "All" : "全部"}<span class="count">${sources.reduce((n, s) => n + s.items.length, 0)}</span></button>${sources
     .map(
       (s, i) =>
         `<button class="source-tab${i === 0 ? " active" : ""}" data-source="${escapeHtml(s.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">${escapeHtml(s.sourceName)}<span class="count">${s.items.length}</span></button>`,
@@ -568,19 +568,21 @@ function renderRawCategoryPanel(
   categorySummaries?: Record<string, string>,
 ): string {
   const summaryHtml = categoryKey ? renderCategorySummary(categoryKey, categorySummaries) : "";
-  if (subs.length === 0) {
+  // Filter out completely empty sub-groups (all sources returned 0 items)
+  const nonEmpty = subs.filter(s => s.sources.some(src => src.items.length > 0));
+  if (nonEmpty.length === 0) {
     return summaryHtml + `<p class="empty">${STR.emptyCategory}</p>`;
   }
-  if (subs.length === 1) {
-    return summaryHtml + renderSubContent(category, subs[0], true);
+  if (nonEmpty.length === 1) {
+    return summaryHtml + renderSubContent(category, nonEmpty[0], true);
   }
-  const subTabs = subs
+  const subTabs = nonEmpty
     .map((s, i) => {
       const count = s.sources.reduce((n, src) => n + src.items.length, 0);
       return `<button class="sub-tab${i === 0 ? " active" : ""}" data-sub="${escapeHtml(s.id)}" data-cat="${category}">${escapeHtml(s.name)}<span class="count">${count}</span></button>`;
     })
     .join("");
-  const panels = subs
+  const panels = nonEmpty
     .map((s, i) => renderSubContent(category, s, i === 0))
     .join("\n");
   return `<nav class="sub-tabs">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
@@ -638,15 +640,17 @@ function renderTagCloud(tags: TagEntry[]): string {
     const cls = heatColors[heatLevel(i, tags.length)];
     return `<span class="tag-cloud-chip ${cls}" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></span>`;
   }).join("");
-  const expandBtn = tags.length > 1
-    ? `<button class="tag-cloud-expand" data-expanded="false">${REPORT_LOCALE === "en" ? `+${tags.length - 1} more` : `展开`}</button>`
+  // Only show expand button when tags won't fit in one row (~10+ tags)
+  const expandBtn = tags.length > 8
+    ? `<button class="tag-cloud-expand" data-expanded="false">${REPORT_LOCALE === "en" ? `+${tags.length - 8} more` : `展开全部`}</button>`
     : "";
   return `<section class="tag-cloud">
     <p class="tag-cloud-heading">${heading}</p>
-    <div class="tag-cloud-body">
+    <div class="tag-cloud-body${tags.length > 8 ? "" : " expanded"}">
       <div class="tag-cloud-fade"></div>
-      ${allChips}${expandBtn}
+      ${allChips}
     </div>
+    ${expandBtn}
   </section>`;
 }
 
@@ -729,6 +733,7 @@ export function renderHtml(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${STR.siteTitle} · ${date}</title>
+<meta name="description" content="AI 智能每日简报 · 全球优质信息聚合·AI 分类精炼·深度分析">
 <style>
   :root {
     --bg: #fafaf9;
@@ -842,6 +847,14 @@ export function renderHtml(
     transition: color 0.2s;
   }
   .archive-link:hover { color: var(--link); border-bottom-style: solid; }
+
+  .update-time {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    font-variant-numeric: tabular-nums;
+  }
 
   .hero-card {
     background: linear-gradient(135deg, var(--hero-grad-from) 0%, var(--hero-grad-to) 100%);
@@ -1742,21 +1755,66 @@ export function renderHtml(
     border-left: 2px solid #d97706;
   }
 
-  footer {
-    margin-top: 3rem;
-    border-top: 1px solid var(--rule);
-    padding-top: 1rem;
-    color: var(--muted);
-    font-size: 0.8rem;
-  }
-</style>
+	  footer {
+	    margin-top: 3rem;
+	    border-top: 1px solid var(--rule);
+	    padding-top: 1rem;
+	    color: var(--muted);
+	    font-size: 0.8rem;
+	  }
+
+	  /* ===== visual polish: glass + glow ===== */
+	  .hero-card {
+	    background: linear-gradient(135deg, color-mix(in srgb, var(--hero-grad-from) 85%, transparent), color-mix(in srgb, var(--hero-grad-to) 85%, transparent));
+	    backdrop-filter: blur(8px);
+	    -webkit-backdrop-filter: blur(8px);
+	  }
+	  .brief {
+	    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, background 0.3s;
+	  }
+	  .brief:hover {
+	    background: color-mix(in srgb, var(--bg-elevated) 95%, var(--link));
+	    border-color: var(--link);
+	    box-shadow: 0 4px 20px rgba(37,99,235,0.08);
+	    transform: translateY(-2px);
+	  }
+	  @media (prefers-color-scheme: dark) {
+	    .brief:hover {
+	      background: color-mix(in srgb, var(--bg-elevated) 90%, var(--link));
+	      box-shadow: 0 4px 20px rgba(96,165,250,0.1);
+	    }
+	  }
+	  .category-summary {
+	    backdrop-filter: blur(4px);
+	    -webkit-backdrop-filter: blur(4px);
+	  }
+	  .trading-overview-card {
+	    backdrop-filter: blur(4px);
+	    -webkit-backdrop-filter: blur(4px);
+	  }
+	  .review-panel.passed {
+	    background: linear-gradient(135deg, color-mix(in srgb, var(--bg-elevated) 95%, #16a34a), var(--bg-elevated));
+	  }
+	  .review-panel.has-issues {
+	    background: linear-gradient(135deg, color-mix(in srgb, var(--bg-elevated) 95%, #d97706), var(--bg-elevated));
+	  }
+
+	  /* ===== source count badge animation ===== */
+	  .source-tab .count, .sub-tab .count {
+	    transition: transform 0.2s;
+	  }
+	  .source-tab:hover .count, .sub-tab:hover .count {
+	    transform: scale(1.15);
+	  }
+	</style>
 </head>
 <body>
 <main>
   <header class="report-header">
-    <span class="eyebrow">${STR.siteTitle}</span>
-    <h1 class="report-title">${date}</h1>
-    ${process.env.WEB_MODE === "true" ? `<a class="archive-link" href="../archive.html">${STR.archiveLink}</a>` : ""}
+      <span class="eyebrow">${STR.siteTitle}</span>
+      <h1 class="report-title">${date}</h1>
+      <span class="update-time">更新时间: ${new Date().toLocaleString("zh-CN", { timeZone: getReportTz(), hour12: false, hour: "2-digit", minute: "2-digit", month: "2-digit", day: "2-digit" })}</span>
+      ${process.env.WEB_MODE === "true" ? `<a class="archive-link" href="../archive.html">${STR.archiveLink}</a>` : ""}
   </header>
 
   ${tagCloudHtml}
@@ -1788,7 +1846,7 @@ export function renderHtml(
     ${renderRawCategoryPanel("finance", raw.finance, "finance", categorySummaries)}
   </section>
   ${techCommunitySubs.length > 0 ? `<section class="panel" data-panel="community">
-    ${renderRawCategoryPanel("tech", techCommunitySubs)}
+    ${renderRawCategoryPanel("tech", techCommunitySubs, "community", categorySummaries)}
   </section>` : ""}
 
   <footer>
@@ -1833,6 +1891,23 @@ export function renderHtml(
       });
     });
   });
+  // Smart "All" button for source-tabs: when present, toggles show-all mode.
+  // The "all" tab is keyed by its data-source="__all__" attribute.
+  document.querySelectorAll('.source-tab[data-source="__all__"]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var subContent = btn.closest('.sub-content');
+      if (!subContent) return;
+      var isActive = btn.classList.contains('active');
+      // Toggle: if active → deactivate, show single source; else activate
+      subContent.querySelectorAll('.source-tab').forEach(function (b) {
+        b.classList.toggle('active', b === btn);
+      });
+      subContent.querySelectorAll('.source-content').forEach(function (p) {
+        // Show all content panels when "all" is active
+        p.classList.toggle('active', !isActive);
+      });
+    });
+  });
   document.querySelectorAll('.trading-group-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var grp = btn.dataset.group;
@@ -1847,13 +1922,15 @@ export function renderHtml(
   // Tag cloud: expand/collapse — show only one row, click to reveal all
   document.querySelectorAll('.tag-cloud-expand').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      var body = btn.parentElement;
+      var section = btn.closest('.tag-cloud');
+      if (!section) return;
+      var body = section.querySelector('.tag-cloud-body');
       if (!body) return;
       var expanded = btn.dataset.expanded === 'true';
       btn.dataset.expanded = expanded ? 'false' : 'true';
       body.classList.toggle('expanded', !expanded);
       btn.textContent = expanded
-        ? ('\\u5c55\\u5f00')
+        ? ('\\u5c55\\u5f00\\u5168\\u90e8')
         : ('\\u2212 \\u6536\\u8d77');
     });
   });
