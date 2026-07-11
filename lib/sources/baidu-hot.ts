@@ -60,8 +60,7 @@ export async function fetchBaiduHot(
 
     const parsed: BaiduHotResponse = JSON.parse(json);
     if (!parsed.success || !parsed.data?.cards) {
-      console.warn(`[baidu-hot] API returned no data`);
-      return [];
+      throw new Error("Baidu hot-search API returned no data");
     }
 
     // Flatten all card contents
@@ -96,10 +95,8 @@ export async function fetchBaiduHot(
         category: "trending",
       };
     });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[baidu-hot] fetch failed: ${msg}`);
-    return [];
+  } catch (error) {
+    throw new Error("Baidu hot-search fetch failed", { cause: error });
   }
 }
 

@@ -20,6 +20,7 @@ import { loadAllSources } from "../lib/sources/registry";
 import { fetchSource } from "../lib/sources/dispatch";
 import { renderHtml } from "../lib/output/render";
 import { groupRaw } from "../lib/output/render";
+import { parseReportSidecar } from "../lib/output/sidecar";
 import type { DailyReport, ArticleInput } from "../lib/ai/pipeline";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +48,7 @@ function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: st
   const articlesJson = `${base}-articles.json`;
   if (!fs.existsSync(reportJson) || !fs.existsSync(articlesJson)) return null;
   const report = JSON.parse(fs.readFileSync(reportJson, "utf8")) as DailyReport;
-  const sidecar = JSON.parse(fs.readFileSync(articlesJson, "utf8")) as { date: string; articles: ArticleInput[]; failedSources?: Array<{ id: string; name: string; reason: string }> };
+  const sidecar = parseReportSidecar(JSON.parse(fs.readFileSync(articlesJson, "utf8")));
   return { report, articles: sidecar.articles, date: dateDir, failedSources: sidecar.failedSources };
 }
 
@@ -81,7 +82,6 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       console.log(`[serve] refetching ${sourceId}…`);
-      // Use a longer timeout for manual refetch (30s vs 8s for RSS)
       const items = await fetchSource(source);
       console.log(`[serve] ${sourceId}: got ${items.length} items`);
 
@@ -102,6 +102,9 @@ const server = http.createServer(async (req, res) => {
           fs.writeFileSync(`${base}.html`, html, "utf8");
           fs.writeFileSync(`${base}-articles.json`, JSON.stringify({ date: latest.date, articles: latest.articles, failedSources: latest.failedSources }, null, 2), "utf8");
           console.log(`[serve] merged ${newItems.length} new items, re-rendered HTML`);
+        }
+        if (items.length > 0) {
+          latest.failedSources = (latest.failedSources ?? []).filter((f) => f.id !== sourceId);
         }
       }
 

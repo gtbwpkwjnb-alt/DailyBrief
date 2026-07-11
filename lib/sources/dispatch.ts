@@ -7,6 +7,7 @@ import { fetchHuggingfacePapers } from "./huggingface-papers";
 import { fetchKr36Hot } from "./kr-36-hot";
 import { fetchLinuxDo } from "./linuxdo";
 import { fetchRss } from "./rss";
+import { fetchReader } from "./reader";
 import { fetchV2ex } from "./v2ex";
 import { fetchWeiboHot } from "./weibo-hot";
 import type { RawArticle, SourceDef } from "./types";
@@ -16,6 +17,7 @@ import type { RawArticle, SourceDef } from "./types";
  * Add a new branch here when introducing a non-RSS fetcher.
  */
 export async function fetchSource(source: SourceDef): Promise<RawArticle[]> {
+  if (source.type === "reader") return fetchReader(source);
   if (source.id === "hackernews") return fetchHackerNews(source.id);
   if (source.id === "github-trending") return fetchGithubTrending(source.id);
   if (source.id === "v2ex-hot") return fetchV2ex(source.id);

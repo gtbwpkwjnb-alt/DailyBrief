@@ -456,6 +456,15 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+export function safeExternalUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatDate(d: Date | undefined): string {
   if (!d) return "";
   try {
@@ -478,7 +487,8 @@ function formatDate(d: Date | undefined): string {
 
 function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const title = escapeHtml(a.title);
-  const url = escapeHtml(a.url);
+  const externalUrl = safeExternalUrl(a.url);
+  const url = externalUrl ? escapeHtml(externalUrl) : "";
   const excerpt = a.excerpt ? escapeHtml(a.excerpt) : "";
   // Backwards-compat: old sidecar JSON files may carry `cnSummary` instead.
   const summaryText = a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary;
@@ -493,9 +503,11 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const showTitle = !showSource;
   // Build meta line: source name (clickable link) + rest of meta
   let metaHtml = "";
-  if (sourceLabel) {
+  if (sourceLabel && url) {
     const sourceLink = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-source-link">${sourceLabel}</a>`;
     metaHtml = time ? `${sourceLink} · ${time}` : sourceLink;
+  } else if (sourceLabel) {
+    metaHtml = time ? `${sourceLabel} · ${time}` : sourceLabel;
   } else if (time) {
     metaHtml = time;
   }
@@ -508,12 +520,12 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
 
   return `<article class="article"${tagAttr}>
     ${metaHtml ? `<p class="article-meta">${metaHtml}</p>` : ""}
-    ${showTitle ? `<h3 class="article-title"><a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a></h3>` : ""}
+    ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>` : ""}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
     ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
     ${tags ? `<p class="article-tags">${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</p>` : ""}
     ${excerpt ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
-    ${metaHtml || showTitle ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${title}">🔗</a>` : ""}
+    ${url && (metaHtml || showTitle) ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${title}">🔗</a>` : ""}
   </article>`;
 }
 

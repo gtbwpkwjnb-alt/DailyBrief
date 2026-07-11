@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { httpFetch } from "./http";
 import type { RawArticle } from "./types";
 
 /**
@@ -16,7 +17,7 @@ export async function fetchGithubTrending(
   sourceId: string,
   limit = 25,
 ): Promise<RawArticle[]> {
-  const html = await fetch("https://github.com/trending?since=daily", {
+  const html = await httpFetch("https://github.com/trending?since=daily", {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

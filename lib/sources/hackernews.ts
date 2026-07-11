@@ -1,4 +1,5 @@
 import type { RawArticle } from "./types";
+import { httpFetch } from "./http";
 
 const HN_BASE = "https://hacker-news.firebaseio.com/v0";
 
@@ -20,13 +21,11 @@ export async function fetchHackerNews(
   sourceId: string,
   limit = 30,
 ): Promise<RawArticle[]> {
-  const ids = (await fetch(`${HN_BASE}/topstories.json`).then((r) =>
-    r.json(),
-  )) as number[];
+  const ids = (await (await httpFetch(`${HN_BASE}/topstories.json`)).json()) as number[];
   const slice = ids.slice(0, limit);
   const items = await Promise.all(
     slice.map((id) =>
-      fetch(`${HN_BASE}/item/${id}.json`)
+      httpFetch(`${HN_BASE}/item/${id}.json`)
         .then((r) => r.json() as Promise<HnItem>)
         .catch(() => null),
     ),

@@ -53,8 +53,7 @@ export async function fetchBilibiliRanking(
     );
     const parsed: BiliPopularResponse = JSON.parse(json);
     if (parsed.code !== 0 || !parsed.data?.list) {
-      console.warn(`[bilibili-ranking] API error: code=${parsed.code}`);
-      return [];
+      throw new Error(`Bilibili ranking API error: code=${parsed.code}`);
     }
 
     return parsed.data.list.slice(0, limit).map((item) => {
@@ -78,10 +77,8 @@ export async function fetchBilibiliRanking(
         category: "tech",
       };
     });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[bilibili-ranking] fetch failed: ${msg}`);
-    return [];
+  } catch (error) {
+    throw new Error("Bilibili ranking fetch failed", { cause: error });
   }
 }
 

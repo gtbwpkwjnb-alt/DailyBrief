@@ -1,10 +1,24 @@
 export type Category = "trending" | "tech" | "finance" | "politics";
-export type SourceType = "rss" | "api" | "scrape";
+export type SourceType = "rss" | "api" | "scrape" | "reader";
+export type SourceProvider = "direct" | "freshrss" | "miniflux";
+export type SourceTier = "core" | "standard" | "supplement";
 
 export interface SourceDef {
   id: string;
   name: string;
   type: SourceType;
+  /**
+   * Collection boundary. Omitted sources use the existing direct fetch path.
+   * Reader providers pull already-ingested content from a single API.
+   */
+  provider?: SourceProvider;
+  /**
+   * External feed/stream ID for reader providers. FreshRSS accepts a stream
+   * name; Miniflux accepts an optional numeric feed ID.
+   */
+  providerSourceId?: string;
+  /** Operational importance for provider-aware health reporting and gates. */
+  tier?: SourceTier;
   url: string;
   category: Category;
   /**

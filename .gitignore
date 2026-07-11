@@ -18,6 +18,8 @@
 
 # typescript
 *.tsbuildinfo
+/test-results/
+/playwright-report/
 
 # screenshot originals (only the cropped versions are committed)
 /docs/screenshots/originals/

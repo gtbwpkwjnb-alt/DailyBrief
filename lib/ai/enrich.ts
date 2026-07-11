@@ -1,4 +1,5 @@
 import { jsonrepair } from "jsonrepair";
+import { parseConsolidatedResult } from "./consolidated-validation";
 import { runLlm } from "./llm";
 import { extractJson } from "./json-util";
 import { REPORT_LOCALE } from "../sources/registry";
@@ -848,17 +849,6 @@ Output STRICTLY a JSON object, no markdown:
 const CONSOLIDATED_PROMPTS =
   REPORT_LOCALE === "en" ? CONSOLIDATED_SYSTEM_PROMPT_EN : CONSOLIDATED_SYSTEM_PROMPT_ZH;
 
-export interface ConsolidatedItem {
-  url: string;
-  summary: string;
-  tags: string[];
-  importance: number;
-}
-
-export interface ConsolidatedResult {
-  items: ConsolidatedItem[];
-}
-
 /**
  * One-pass enrichment for a batch of articles in the same category.
  * Replaces: enrichTrendingSummaries + enrichFinanceNewsSummaries +
@@ -873,6 +863,11 @@ export async function consolidatedEnrich(
   items: EnrichInput[],
 ): Promise<Map<string, { summary: string; tags: string[]; importance: number }>> {
   if (items.length === 0) return new Map();
+
+  const result = new Map<string, { summary: string; tags: string[]; importance: number }>();
+  const merge = (values: Map<string, { summary: string; tags: string[]; importance: number }>) => {
+    for (const [url, value] of values) result.set(url, value);
+  };
 
   const langHeader =
     REPORT_LOCALE === "en"
@@ -895,24 +890,54 @@ export async function consolidatedEnrich(
     `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
   ].join("\n");
 
-  // Attempt 1
+  // Retry the full batch once, then recover missing URLs in smaller batches.
   try {
-    return await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel);
+    merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[enrich] consolidated "${categoryLabel}" attempt 1 failed: ${msg} — retrying in 10s…`);
   }
 
-  // Retry after 10s
-  await new Promise((r) => setTimeout(r, 10_000));
-  try {
-    return await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[enrich] consolidated "${categoryLabel}" attempt 2 also failed: ${msg}`);
+  if (result.size === 0) {
+    await new Promise((r) => setTimeout(r, 10_000));
+    try {
+      merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[enrich] consolidated "${categoryLabel}" attempt 2 also failed: ${msg}`);
+    }
   }
 
-  return new Map();
+  const missing = items.filter((item) => !result.has(item.url));
+  for (let i = 0; i < missing.length; i += 10) {
+    const batch = missing.slice(i, i + 10);
+    const batchPrompt = buildConsolidatedPrompt(categoryLabel, batch, langHeader);
+    try {
+      merge(await runConsolidatedOnce(batch, CONSOLIDATED_PROMPTS, batchPrompt, `${categoryLabel}-recovery`));
+    } catch (e) {
+      console.warn(`[enrich] consolidated "${categoryLabel}" recovery batch failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return result;
+}
+
+function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], langHeader: string): string {
+  return [
+    langHeader,
+    "",
+    `以下为今日「${categoryLabel}」板块的 ${items.length} 条条目：`,
+    JSON.stringify(items.map((it) => ({
+      url: it.url,
+      title: it.title,
+      excerpt: (it.excerpt ?? "").slice(0, 250),
+      source: it.source ?? "",
+      category: categoryLabel,
+    }))),
+    "",
+    `请输出 {"items": [{"url": "...", "summary": "...", "tags": [...], "importance": N}, ...]}`,
+    `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
+  ].join("\n");
 }
 
 async function runConsolidatedOnce(
@@ -930,22 +955,14 @@ async function runConsolidatedOnce(
   });
   const cleaned = extractJson(text);
 
-  let parsed: ConsolidatedResult;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned) as unknown;
   } catch {
-    parsed = JSON.parse(jsonrepair(cleaned));
+    parsed = JSON.parse(jsonrepair(cleaned)) as unknown;
   }
-
-  for (const item of parsed.items ?? []) {
-    if (item.url && item.summary) {
-      result.set(item.url, {
-        summary: item.summary.trim(),
-        tags: (item.tags ?? []).map((t) => t.trim()).filter(Boolean),
-        importance: typeof item.importance === "number" ? item.importance : 5,
-      });
-    }
-  }
+  const validated = parseConsolidatedResult(parsed, items.map((item) => item.url));
+  for (const [url, value] of validated) result.set(url, value);
 
   // Diagnostic for undercount
   if (result.size < items.length / 2 && items.length >= 3) {

@@ -130,11 +130,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Verify Node.js version
+        run: node -e "if (Number(process.versions.node.split('.')[0]) < 20) process.exit(1)"
       - run: npm ci
 
       - name: Restore existing reports from gh-pages
@@ -148,6 +146,7 @@ jobs:
           fi
 
       - name: Generate today's report
+        timeout-minutes: 18
         env:
           LLM_BACKEND: ${{ vars.LLM_BACKEND || 'anthropic' }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
@@ -158,6 +157,11 @@ jobs:
           ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          FRESHRSS_API_URL: ${{ vars.FRESHRSS_API_URL }}
+          FRESHRSS_API_TOKEN: ${{ secrets.FRESHRSS_API_TOKEN }}
+          MINIFLUX_API_URL: ${{ vars.MINIFLUX_API_URL }}
+          MINIFLUX_API_TOKEN: ${{ secrets.MINIFLUX_API_TOKEN }}
+          READER_FETCH_LIMIT: ${{ vars.READER_FETCH_LIMIT }}
           REPORT_LOCALE: ${{ vars.REPORT_LOCALE || 'zh' }}
           REPORT_TZ: ${{ vars.REPORT_TZ }}
           WEB_MODE: "true"
@@ -167,10 +171,28 @@ jobs:
         run: npm run build-site
 
       - name: Publish to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
+        run: |
+          set -euo pipefail
+          PUBLISH_DIR="$RUNNER_TEMP/daily-brief-pages"
+          git worktree add --detach "$PUBLISH_DIR"
+          pushd "$PUBLISH_DIR"
+          git switch --orphan pages-publish
+          git rm -rf . || true
+          cp -R "$GITHUB_WORKSPACE/daily_reports/." .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "daily: report for ${{ github.run_id }}"
+          git push --force origin HEAD:gh-pages
+
+      - name: Upload run diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./daily_reports
-          publish_branch: gh-pages
-          keep_files: false
-          commit_message: "daily: report for ${{ github.run_id }}"
+          name: daily-brief-diagnostics-${{ github.run_id }}
+          path: |
+            logs/daily-*.log
+            logs/enrich-*.txt
+            daily_reports/*/source-health.json
+          if-no-files-found: warn
+          retention-days: 14

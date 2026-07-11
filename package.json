@@ -2,6 +2,7 @@
   "name": "daily-brief",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dry-run": "tsx scripts/dry-run.ts",
     "daily": "tsx scripts/daily.ts",
@@ -11,6 +12,11 @@
     "quota-report": "tsx scripts/quota-report.ts",
     "sources": "tsx scripts/sources.ts",
     "sources:check": "tsx scripts/sources.ts check",
+    "network:check": "tsx scripts/network-check.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:ui": "playwright test",
+    "check": "npm run typecheck && npm run sources:check && npm run test && npm run test:ui",
     "deploy": "node scripts/deploy.mjs",
     "build-site": "node scripts/build-site.mjs",
     "serve": "tsx scripts/serve.ts",
@@ -21,9 +27,12 @@
     "cheerio": "^1.2.0",
     "jsonrepair": "^3.14.0",
     "openai": "^6.38.0",
-    "rss-parser": "^3.13.0"
+    "rss-parser": "^3.13.0",
+    "undici": "^8.7.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^20",
     "dotenv": "^17.4.2",
     "tsx": "^4.21.0",

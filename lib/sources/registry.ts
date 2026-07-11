@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sourceRegistrySchema } from "./schema";
 import type { SourceDef } from "./types";
 
 /**
@@ -52,35 +53,14 @@ function loadAndValidate(): SourceDef[] {
   } catch (e) {
     throw new Error(`Invalid JSON in ${CONFIG_PATH}: ${(e as Error).message}`);
   }
-  if (!Array.isArray(parsed)) {
-    throw new Error(`${CONFIG_PATH}: top-level must be an array of sources`);
+  const result = sourceRegistrySchema.safeParse(parsed);
+  if (!result.success) {
+    const details = result.error.issues
+      .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`${CONFIG_PATH}: ${details}`);
   }
-
-  const validTypes = new Set(["rss", "api", "scrape"]);
-  const validCategories = new Set(["trending", "tech", "finance", "politics"]);
-  const seenIds = new Set<string>();
-
-  for (let i = 0; i < parsed.length; i++) {
-    const s = parsed[i] as Record<string, unknown>;
-    const at = `sources.config.json[${i}]`;
-    if (typeof s.id !== "string" || !s.id) throw new Error(`${at}: missing string 'id'`);
-    if (seenIds.has(s.id)) throw new Error(`${at}: duplicate id '${s.id}'`);
-    seenIds.add(s.id);
-    if (typeof s.name !== "string") throw new Error(`${at} (${s.id}): missing 'name'`);
-    if (typeof s.url !== "string") throw new Error(`${at} (${s.id}): missing 'url'`);
-    if (!validTypes.has(s.type as string)) {
-      throw new Error(`${at} (${s.id}): invalid 'type' '${String(s.type)}'`);
-    }
-    if (!validCategories.has(s.category as string)) {
-      throw new Error(`${at} (${s.id}): invalid 'category' '${String(s.category)}'`);
-    }
-    if (s.locales !== undefined) {
-      if (!Array.isArray(s.locales) || s.locales.some((l) => l !== "zh" && l !== "en")) {
-        throw new Error(`${at} (${s.id}): 'locales' must be an array of "zh" | "en"`);
-      }
-    }
-  }
-  return parsed as SourceDef[];
+  return result.data as SourceDef[];
 }
 
 function filterByLocale(all: SourceDef[]): SourceDef[] {

@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import { curlFetch } from "./curl-fetch";
+import { httpFetch } from "./http";
 import type { Category, RawArticle } from "./types";
 
 const parser = new Parser({
@@ -34,7 +35,8 @@ export async function fetchRss(
     const xml = await curlFetch(url, CURL_HEADERS);
     feed = await parser.parseString(xml);
   } else {
-    feed = await parser.parseURL(url);
+    const response = await httpFetch(url, { headers: CURL_HEADERS }, 12_000);
+    feed = await parser.parseString(await response.text());
   }
 
   return (feed.items ?? [])

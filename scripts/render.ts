@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { ArticleInput, DailyReport } from "../lib/ai/pipeline";
+import { parseReportSidecar } from "../lib/output/sidecar";
 import { sources } from "../lib/sources/registry";
 import { todayKey } from "../lib/utils";
 
@@ -25,17 +26,9 @@ function loadArticles(date: string): { articles: ArticleInput[]; failedSources?:
         `Run \`npm run daily\` for ${date} first (or any date >= when sidecar was introduced).`,
     );
   }
-  const data = JSON.parse(fs.readFileSync(file, "utf8")) as {
-    articles: Array<
-      Omit<ArticleInput, "publishedAt"> & { publishedAt?: string }
-    >;
-    failedSources?: Array<{ id: string; name: string; reason: string }>;
-  };
+  const data = parseReportSidecar(JSON.parse(fs.readFileSync(file, "utf8")));
   return {
-    articles: data.articles.map((a) => ({
-      ...a,
-      publishedAt: a.publishedAt ? new Date(a.publishedAt) : undefined,
-    })),
+    articles: data.articles,
     failedSources: data.failedSources,
   };
 }

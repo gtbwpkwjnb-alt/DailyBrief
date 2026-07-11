@@ -18,7 +18,7 @@ export async function curlFetch(
   headers: Record<string, string> = {},
   timeoutSec = 12,
 ): Promise<string> {
-  const args = ["-sSL", "-m", String(timeoutSec), "--compressed"];
+  const args = ["-fsSL", "--connect-timeout", String(timeoutSec), "-m", String(timeoutSec), "--compressed"];
   for (const [k, v] of Object.entries(headers)) {
     args.push("-H", `${k}: ${v}`);
   }

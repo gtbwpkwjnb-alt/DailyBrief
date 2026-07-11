@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { sources, REPORT_LOCALE } from "../lib/sources/registry";
 import { fetchSource } from "../lib/sources/dispatch";
+import { describeHttpError, probeHttpEndpoints, proxyLabel } from "../lib/sources/http";
 import {
   generateDailyReport,
   type ArticleInput,
@@ -40,6 +41,95 @@ import { todayKey } from "../lib/utils";
 
 const OUTPUT_DIR = "daily_reports";
 const CACHE_DIR = ".cache";
+const LOG_DIR = "logs";
+
+type FailedSource = { id: string; name: string; reason: string };
+
+type SourceHealth = {
+  id: string;
+  name: string;
+  category: string;
+  provider: string;
+  tier: string;
+  success: boolean;
+  hasItems: boolean;
+  attempts: number;
+  durationMs: number;
+  itemCount: number;
+  reason?: string;
+};
+
+type FetchResult = {
+  source: (typeof sources)[number];
+  items?: Awaited<ReturnType<typeof fetchSource>>;
+  health: SourceHealth;
+};
+
+type NetworkProbe = { url: string; ok: boolean; reason?: string };
+
+function appendRunLog(date: string, message: string): void {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  fs.appendFileSync(path.join(LOG_DIR, `daily-${date}.log`), `[${new Date().toISOString()}] ${message}\n`, "utf8");
+}
+
+function writeSourceHealth(
+  dateDir: string,
+  date: string,
+  sourceSuccessRate: number,
+  sources: SourceHealth[],
+  network: NetworkProbe[],
+): void {
+  const summarize = (keyOf: (source: SourceHealth) => string) => {
+    const stats = new Map<string, { total: number; succeeded: number; nonEmpty: number }>();
+    for (const source of sources) {
+      const key = keyOf(source);
+      const current = stats.get(key) ?? { total: 0, succeeded: 0, nonEmpty: 0 };
+      current.total += 1;
+      if (source.success) current.succeeded += 1;
+      if (source.hasItems) current.nonEmpty += 1;
+      stats.set(key, current);
+    }
+    return [...stats.entries()].map(([key, stat]) => ({
+      key,
+      ...stat,
+      successRate: stat.succeeded / stat.total,
+      contentRate: stat.nonEmpty / stat.total,
+    }));
+  };
+  const providers = summarize((source) => source.provider)
+    .map(({ key, ...stats }) => ({ provider: key, ...stats }));
+  const categories = summarize((source) => source.category)
+    .map(({ key, ...stats }) => ({ category: key, ...stats }));
+  fs.mkdirSync(dateDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dateDir, "source-health.json"),
+    JSON.stringify({ date, generatedAt: new Date().toISOString(), sourceSuccessRate, network, providers, categories, sources }, null, 2),
+    "utf8",
+  );
+}
+
+function readPositiveInt(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function readFraction(name: string, fallback: number): number {
+  const value = Number.parseFloat(process.env[name] ?? "");
+  return Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback;
+}
+
+function sourceHost(source: (typeof sources)[number]): string {
+  const providerUrl = source.provider === "freshrss"
+    ? process.env.FRESHRSS_API_URL
+    : source.provider === "miniflux"
+      ? process.env.MINIFLUX_API_URL
+      : undefined;
+  try {
+    return new URL(providerUrl ?? source.url).host;
+  } catch {
+    return source.id;
+  }
+}
 
 /**
  * Enrichment cache: after each enrich step succeeds, its results are saved
@@ -98,89 +188,117 @@ function writeTagCache(date: string, map: Map<string, string[]>): void {
   }
 }
 
-/**
- * Fetch all enabled sources with concurrency control.
- * Sources sorted by priority descending (high-priority sources fetched first).
- * Serial fetching of 50+ sources means worst-case ~13 min (15s timeout × 54).
- * Parallel batches of 10 cut that to ~2 min worst-case.
- */
-/**
- * Fetch all enabled sources with concurrency control and retry.
- * batchSize=10: 10 parallel fetches per batch. With 55 sources ≈ 6 rounds.
- * Each failed source is retried once after 5s delay.
- */
-async function fetchAll(batchSize = 10): Promise<{ articles: ArticleInput[]; failedSources: Array<{ id: string; name: string; reason: string }> }> {
-  const articles: ArticleInput[] = [];
-  const failedSources: Array<{ id: string; name: string; reason: string }> = [];
-  // Sort by priority descending so best sources are fetched first
-  const enabled = sources
-    .filter((s) => s.enabled !== false)
-    .sort((a, b) => (b.priority ?? 3) - (a.priority ?? 3));
-  for (let i = 0; i < enabled.length; i += batchSize) {
-    const batch = enabled.slice(i, i + batchSize);
-    const results = await Promise.allSettled(
-      batch.map(async (source) => {
-        const items = await fetchSource(source);
-        return { source, items };
-      }),
-    );
-    for (const res of results) {
-      if (res.status === "fulfilled") {
-        const { source, items } = res.value;
-        console.log(`  ${source.id.padEnd(20)} ${items.length}`);
-        articles.push(...items.map((it) => ({ ...it, source: source.name })));
-      } else {
-        const reason = res.reason instanceof Error ? res.reason.message : String(res.reason);
-        const failedIdx = results.indexOf(res);
-        const failedSource = batch[failedIdx];
-        const id = failedSource?.id ?? "unknown";
-        console.error(`  ${id.padEnd(20)} FAILED — ${reason}`);
-        failedSources.push({ id, name: failedSource?.name ?? id, reason });
+async function fetchWithRetry(
+  source: (typeof sources)[number],
+  maxAttempts: number,
+  baseDelayMs: number,
+): Promise<{ source: (typeof sources)[number]; items?: Awaited<ReturnType<typeof fetchSource>>; health: SourceHealth }> {
+  const startedAt = Date.now();
+  let reason = "unknown fetch error";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const items = await fetchSource(source);
+      return {
+        source,
+        items,
+        health: {
+          id: source.id,
+          name: source.name,
+          category: source.category,
+          provider: source.provider ?? "direct",
+          tier: source.tier ?? "standard",
+          success: true,
+          hasItems: items.length > 0,
+          attempts: attempt,
+          durationMs: Date.now() - startedAt,
+          itemCount: items.length,
+        },
+      };
+    } catch (error) {
+      reason = describeHttpError(error);
+      if (attempt < maxAttempts) {
+        const delayMs = baseDelayMs * 2 ** (attempt - 1) + Math.floor(Math.random() * baseDelayMs);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-    }
-  }
-  // Retry failed sources once after 5s delay, batched to respect concurrency limits
-  if (failedSources.length > 0) {
-    console.log(`[daily] retrying ${failedSources.length} failed sources in 5s…`);
-    await new Promise((r) => setTimeout(r, 5000));
-    const retryBatchSize = Math.min(batchSize, 5); // cap retry concurrency lower than first round
-    let recovered = 0;
-    for (let i = 0; i < failedSources.length; i += retryBatchSize) {
-      const batch = failedSources.slice(i, i + retryBatchSize);
-      const retryResults = await Promise.allSettled(
-        batch.map(async (f) => {
-          const source = sources.find((s) => s.id === f.id);
-          if (!source || source.enabled === false) return null;
-          try {
-            const items = await fetchSource(source);
-            return { source, items };
-          } catch {
-            return null;
-          }
-        }),
-      );
-      for (const res of retryResults) {
-        if (res.status === "fulfilled" && res.value) {
-          const { source, items } = res.value;
-          console.log(`  ${source.id.padEnd(20)} RETRY OK — ${items.length} items`);
-          articles.push(...items.map((it) => ({ ...it, source: source.name })));
-          recovered++;
-        }
-      }
-    }
-    // Update failedSources list: remove recovered ones by checking which
-    // sources now have articles in the result set
-    if (recovered > 0) {
-      const articleSourceIds = new Set(articles.map((a) => a.sourceId));
-      const before = failedSources.length;
-      for (let i = failedSources.length - 1; i >= 0; i--) {
-        if (articleSourceIds.has(failedSources[i].id)) failedSources.splice(i, 1);
-      }
-      console.log(`[daily] retry recovered ${recovered}/${before} sources`);
     }
   }
 
-  return { articles, failedSources };
+  return {
+    source,
+    health: {
+      id: source.id,
+      name: source.name,
+      category: source.category,
+      provider: source.provider ?? "direct",
+      tier: source.tier ?? "standard",
+      success: false,
+      hasItems: false,
+      attempts: maxAttempts,
+      durationMs: Date.now() - startedAt,
+      itemCount: 0,
+      reason,
+    },
+  };
+}
+
+/** Fetch enabled sources in bounded concurrent batches with per-source retry. */
+async function fetchAll(): Promise<{ articles: ArticleInput[]; failedSources: FailedSource[]; health: SourceHealth[] }> {
+  const articles: ArticleInput[] = [];
+  const failedSources: FailedSource[] = [];
+  const health: SourceHealth[] = [];
+  const batchSize = readPositiveInt("SOURCE_FETCH_CONCURRENCY", 6);
+  const maxAttempts = readPositiveInt("SOURCE_FETCH_ATTEMPTS", 3);
+  const retryBaseMs = readPositiveInt("SOURCE_FETCH_RETRY_BASE_MS", 1_000);
+  const hostFailureThreshold = readPositiveInt("SOURCE_HOST_FAILURE_THRESHOLD", 3);
+  const hostFailures = new Map<string, number>();
+  const enabled = sources
+    .filter((s) => s.enabled !== false)
+    .sort((a, b) => (b.priority ?? 3) - (a.priority ?? 3));
+
+  for (let i = 0; i < enabled.length; i += batchSize) {
+    const batch = enabled.slice(i, i + batchSize);
+    const results: FetchResult[] = await Promise.all(batch.map(async (source): Promise<FetchResult> => {
+      const host = sourceHost(source);
+      const failures = hostFailures.get(host) ?? 0;
+      if (failures >= hostFailureThreshold) {
+        return Promise.resolve({
+          source,
+          health: {
+            id: source.id,
+            name: source.name,
+            category: source.category,
+            provider: source.provider ?? "direct",
+            tier: source.tier ?? "standard",
+            success: false,
+            hasItems: false,
+            attempts: 0,
+            durationMs: 0,
+            itemCount: 0,
+            reason: `host circuit open after ${failures} failures: ${host}`,
+          },
+        });
+      }
+      return fetchWithRetry(source, maxAttempts, retryBaseMs);
+    }));
+    for (const res of results) {
+      health.push(res.health);
+      if (res.health.success && res.items) {
+        console.log(`  ${res.source.id.padEnd(20)} ${res.items.length} (${res.health.attempts} attempt${res.health.attempts === 1 ? "" : "s"})`);
+        articles.push(...res.items.map((it) => ({ ...it, source: res.source.name })));
+      } else {
+        const reason = res.health.reason ?? "unknown fetch error";
+        console.error(`  ${res.source.id.padEnd(20)} FAILED after ${res.health.attempts} attempts — ${reason}`);
+        failedSources.push({ id: res.source.id, name: res.source.name, reason });
+        const host = sourceHost(res.source);
+        if (res.health.attempts > 0) {
+          hostFailures.set(host, (hostFailures.get(host) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
+  return { articles, failedSources, health };
 }
 
 async function enrichGhTrending(articles: ArticleInput[], date: string): Promise<void> {
@@ -569,11 +687,27 @@ async function main() {
   validateBackendCredentials();
 
   const date = todayKey();
+  const dateDir = path.join(OUTPUT_DIR, date);
+  const proxy = proxyLabel();
+  appendRunLog(date, `started${proxy ? ` with proxy ${proxy}` : " without proxy"}`);
+  const network = await probeHttpEndpoints();
+  const availableProbes = network.filter((probe) => probe.ok).length;
+  console.log(`[daily] network preflight: ${availableProbes}/${network.length} endpoints reachable${proxy ? ` via ${proxy}` : ""}`);
+  appendRunLog(date, `network preflight ${availableProbes}/${network.length}: ${JSON.stringify(network)}`);
 
   // Phase 1+2+3: Fetch all sources (with priority-based ordering),
   // then globally dedup by URL + title
   console.log(`[daily] ${date} — fetching sources (priority order)…\n`);
-  const { articles, failedSources } = await fetchAll();
+  const { articles, failedSources, health } = await fetchAll();
+  const sourceSuccessRate = health.filter((source) => source.success).length / health.length;
+  const minSourceSuccessRate = readFraction("SOURCE_MIN_SUCCESS_RATE", 0.6);
+  writeSourceHealth(dateDir, date, sourceSuccessRate, health, network);
+  appendRunLog(date, `source health ${(sourceSuccessRate * 100).toFixed(1)}% (${health.filter((source) => source.success).length}/${health.length})`);
+  console.log(`[daily] source health: ${(sourceSuccessRate * 100).toFixed(1)}% success (${health.filter((source) => source.success).length}/${health.length})`);
+  if (sourceSuccessRate < minSourceSuccessRate) {
+    appendRunLog(date, `blocked by SOURCE_MIN_SUCCESS_RATE ${(minSourceSuccessRate * 100).toFixed(1)}%`);
+    throw new Error(`source success rate ${(sourceSuccessRate * 100).toFixed(1)}% is below SOURCE_MIN_SUCCESS_RATE ${(minSourceSuccessRate * 100).toFixed(1)}%`);
+  }
   console.log(`\n[daily] total articles: ${articles.length}, failed sources: ${failedSources.length}`);
   if (articles.length === 0) throw new Error("no articles fetched — aborting");
 
@@ -613,9 +747,9 @@ async function main() {
   // The old pipeline enriched ~15-50 items per category across many calls;
   // consolidated calls need smaller batches for reasonable latency.
   const CATEGORY_ITEM_LIMIT = 40;
-  await Promise.allSettled(CATEGORY_CONFIG.map(async (cfg) => {
+  const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
     const items = articles.filter(cfg.filter).slice(0, CATEGORY_ITEM_LIMIT);
-    if (items.length === 0) return;
+    if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
     const t1 = Date.now();
     const results = await consolidatedEnrich(
       cfg.label,
@@ -627,7 +761,17 @@ async function main() {
       if (r) { a.summary = r.summary; a.tags = r.tags; matched++; }
     }
     console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${items.length} enriched in ${((Date.now()-t1)/1000).toFixed(1)}s`);
+    return { key: cfg.key, requested: items.length, enriched: matched };
   }));
+  const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 0.8);
+  for (const category of enrichmentHealth) {
+    if (category.requested === 0) continue;
+    const coverage = category.enriched / category.requested;
+    if (coverage < minEnrichmentCoverage) {
+      appendRunLog(date, `blocked by ${category.key} enrichment coverage ${(coverage * 100).toFixed(1)}%`);
+      throw new Error(`${category.key} enrichment coverage ${(coverage * 100).toFixed(1)}% is below MIN_ENRICHMENT_COVERAGE ${(minEnrichmentCoverage * 100).toFixed(1)}%`);
+    }
+  }
   console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
   // Phase 5: Trading signals (optional, non-fatal)
@@ -645,8 +789,6 @@ async function main() {
   if (trading) report.trading = trading;
   console.log(`[daily] digest ready in ${((Date.now() - digestT0) / 1000).toFixed(1)}s`);
 
-  const dateDir = path.join(OUTPUT_DIR, date);
-  fs.mkdirSync(dateDir, { recursive: true });
   const base = path.join(dateDir, date);
   const raw = groupRaw(articles, sources);
 
@@ -703,9 +845,18 @@ async function main() {
   }
 
   console.log(`[daily] done.`);
+  appendRunLog(date, "completed successfully");
 }
 
-main().catch((e) => {
-  console.error(`[daily] FAILED:`, e);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    // Some HTTP clients retain keep-alive handles after all output is written.
+    // A scheduled run must terminate so later publish steps can start.
+    process.exit(0);
+  })
+  .catch((e) => {
+    const date = todayKey();
+    appendRunLog(date, `FAILED: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+    console.error(`[daily] FAILED:`, e);
+    process.exit(1);
+  });

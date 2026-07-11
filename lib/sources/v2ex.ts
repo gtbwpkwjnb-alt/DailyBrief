@@ -1,4 +1,5 @@
 import type { RawArticle } from "./types";
+import { httpFetch } from "./http";
 
 /**
  * V2EX 「最热门技术帖子」抓取。
@@ -55,14 +56,11 @@ const HEADERS = {
 
 async function fetchNode(node: string): Promise<V2exTopic[]> {
   try {
-    const r = await fetch(
+    const r = await httpFetch(
       `https://www.v2ex.com/api/topics/show.json?node_name=${node}`,
-      {
-        headers: HEADERS,
-        signal: AbortSignal.timeout(15000),
-      },
+      { headers: HEADERS },
+      15_000,
     );
-    if (!r.ok) return [];
     return (await r.json()) as V2exTopic[];
   } catch {
     return [];

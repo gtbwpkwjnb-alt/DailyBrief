@@ -41,8 +41,7 @@ export async function fetchKr36Hot(
 
     const parsed: Kr36Response = JSON.parse(json);
     if (parsed.code !== 0 || !parsed.data?.items) {
-      console.warn(`[kr-36-hot] API error: code=${parsed.code}`);
-      return [];
+      throw new Error(`36Kr hot-list API error: code=${parsed.code}`);
     }
 
     return parsed.data.items.slice(0, limit).map((item) => ({
@@ -54,9 +53,7 @@ export async function fetchKr36Hot(
       publishedAt: item.created_at ? new Date(item.created_at) : undefined,
       category: "tech",
     }));
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[kr-36-hot] fetch failed: ${msg}`);
-    return [];
+  } catch (error) {
+    throw new Error("36Kr hot-list fetch failed", { cause: error });
   }
 }

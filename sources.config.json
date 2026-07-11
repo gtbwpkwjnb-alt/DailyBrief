@@ -1112,6 +1112,48 @@
     ]
   },
   {
+    "id": "freshrss-tech",
+    "name": "FreshRSS · 科技",
+    "type": "reader",
+    "provider": "freshrss",
+    "providerSourceId": "user/-/label/technology",
+    "url": "https://freshrss.org",
+    "category": "tech",
+    "subcategory": "reader",
+    "tier": "core",
+    "enabled": false,
+    "locales": ["zh", "en"],
+    "notes": "Template: set FRESHRSS_API_URL and FRESHRSS_API_TOKEN, then replace providerSourceId with your FreshRSS label or stream."
+  },
+  {
+    "id": "freshrss-finance",
+    "name": "FreshRSS · 财经",
+    "type": "reader",
+    "provider": "freshrss",
+    "providerSourceId": "user/-/label/finance",
+    "url": "https://freshrss.org",
+    "category": "finance",
+    "subcategory": "news",
+    "tier": "core",
+    "enabled": false,
+    "locales": ["zh", "en"],
+    "notes": "Template: use a FreshRSS label containing authorized finance sources."
+  },
+  {
+    "id": "freshrss-politics",
+    "name": "FreshRSS · 国际",
+    "type": "reader",
+    "provider": "freshrss",
+    "providerSourceId": "user/-/label/world",
+    "url": "https://freshrss.org",
+    "category": "politics",
+    "subcategory": "reader",
+    "tier": "core",
+    "enabled": false,
+    "locales": ["zh", "en"],
+    "notes": "Template: use a FreshRSS label containing official and licensed international sources."
+  },
+  {
     "id": "pragmatic-engineer",
     "name": "The Pragmatic Engineer",
     "type": "rss",

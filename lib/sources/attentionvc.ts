@@ -1,4 +1,5 @@
 import type { RawArticle } from "./types";
+import { httpFetch } from "./http";
 
 /**
  * AttentionVC tracks viral X (Twitter) posts. Their site is a CSR Next.js
@@ -98,16 +99,12 @@ export async function fetchAttentionVc(
   // The `Nh` formats (24h/48h/72h) hit a stale cache on this endpoint and
   // return data 2-3 weeks old — confirmed by direct probe. Stick to `Nd`.
   const url = `${BASE}?window=3d&category=ai&lang=en&limit=30`;
-  const res = await fetch(url, {
+  const res = await httpFetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (compatible; DailyBriefBot/1.0)",
       Accept: "application/json",
     },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    throw new Error(`attentionvc HTTP ${res.status}`);
-  }
+  }, 15_000);
   const data = (await res.json()) as AvcResponse;
   const entries = (data.entries ?? []).filter(isEnglish);
   return entries.slice(0, limit).map((e) => ({

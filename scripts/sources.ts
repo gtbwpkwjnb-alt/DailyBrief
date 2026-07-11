@@ -52,11 +52,11 @@ function list(all: SourceDef[]): void {
   for (const [cat, list] of [...byCat.entries()].sort()) {
     console.log(`── ${cat} ─────────────────────────────────────`);
     console.log(
-      `   ${pad("id", 24)} ${pad("name", 24)} ${pad("subcategory", 18)} ${pad("locales", 8)} type`,
+      `   ${pad("id", 24)} ${pad("name", 24)} ${pad("subcategory", 18)} ${pad("locales", 8)} ${pad("provider", 10)} tier`,
     );
     for (const s of list) {
       console.log(
-        `${statusIcon(s)}  ${pad(s.id, 24)} ${pad(s.name, 24)} ${pad(s.subcategory, 18)} ${pad(localesLabel(s), 8)} ${s.type}`,
+        `${statusIcon(s)}  ${pad(s.id, 24)} ${pad(s.name, 24)} ${pad(s.subcategory, 18)} ${pad(localesLabel(s), 8)} ${pad(s.provider ?? "direct", 10)} ${s.tier ?? "standard"}`,
       );
     }
     console.log("");

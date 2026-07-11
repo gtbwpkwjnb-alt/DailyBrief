@@ -4,7 +4,7 @@ Operational knowledge for any AI coding agent working on this repo (Claude Code,
 
 ## What this project is
 
-`daily-brief` is a local-first pipeline that fetches 23 RSS / API news sources daily (22 in en mode after locale filtering), runs LLM enrichment, and renders a single self-contained HTML report. It runs on the user's machine via the OS scheduler, OR in GitHub Actions publishing to GitHub Pages. No web framework, no DB, no servers.
+`daily-brief` is a local-first pipeline that fetches 62 enabled RSS / API news sources daily (60 in zh mode and 50 in en mode after locale filtering), runs LLM enrichment, and renders a single self-contained HTML report. It runs on the user's machine via the OS scheduler, OR in GitHub Actions publishing to GitHub Pages. No web framework, no DB, no servers.
 
 The repo's `CLAUDE.md` includes this file via `@AGENTS.md`. Don't add stack-specific lore (Next.js, etc.) — there's none in this codebase.
 
@@ -61,12 +61,17 @@ sources.config.json   # SINGLE SOURCE OF TRUTH for the source registry
 | Static-site generator | `npm run build-site` | <1s |
 | List sources by status | `npm run sources` | instant |
 | Validate sources.config.json | `npm run sources:check` | instant |
+| Check outbound network / proxy | `npm run network:check` | ~5s, no LLM |
+| Full local quality gate | `npm run check` | instant |
 
-`[date]` defaults to today in `REPORT_TZ`. Output is `daily_reports/<date>/<date>.html` + `<date>.json` + `<date>-articles.json` (note the hyphen in the articles cache filename); add `<date>.md` if `OUTPUT_MARKDOWN=true`.
+`[date]` defaults to today in `REPORT_TZ`. Output is `daily_reports/<date>/<date>.html` + `<date>.json` + `<date>-articles.json` + `source-health.json` (note the hyphen in the articles cache filename); add `<date>.md` if `OUTPUT_MARKDOWN=true`.
+
+Fetch defaults are 6 concurrent sources with up to 3 exponential-backoff attempts. `SOURCE_MIN_SUCCESS_RATE` (default `0.6`) and `MIN_ENRICHMENT_COVERAGE` (default `0.8`) block publication when quality is below threshold.
+Every run writes `logs/daily-<date>.log` and `source-health.json` before the source-quality gate. Set standard `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` variables when the local network requires an outbound proxy.
 
 ## Adding a source
 
-1. Edit `sources.config.json` — append an entry. Fields: `id` (unique), `name`, `type` (`rss`/`api`/`scrape`), `url`, `category` (`tech`/`finance`/`politics`), optional `subcategory`, `enabled`, `useCurl`, `lang`, `locales`, `notes`.
+1. Edit `sources.config.json` — append an entry. Fields: `id` (unique), `name`, `type` (`rss`/`api`/`scrape`/`reader`), `url`, `category` (`tech`/`finance`/`politics`), optional `provider`, `providerSourceId`, `tier`, `subcategory`, `enabled`, `useCurl`, `lang`, `locales`, `notes`. `reader` requires `provider=freshrss|miniflux`.
 2. For non-RSS types: add a fetcher in `lib/sources/<id>.ts` exporting `fetchXxx(sourceId)` returning `RawArticle[]`, then add a branch in `lib/sources/dispatch.ts`.
 3. Run `npm run sources:check` to validate the JSON, then `npm run dry-run` to verify the fetch.
 

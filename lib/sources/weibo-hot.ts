@@ -49,9 +49,7 @@ export async function fetchWeiboHot(
         category: "trending",
       };
     });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[weibo-hot] fetch failed: ${msg}`);
-    return [];
+  } catch (error) {
+    throw new Error("Weibo hot-search fetch failed", { cause: error });
   }
 }

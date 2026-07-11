@@ -12,7 +12,7 @@
 [![Demo: live](https://img.shields.io/badge/demo-leiting--eric.github.io%2FDailyBrief-brightgreen.svg)](https://leiting-eric.github.io/DailyBrief)
 [![Stars](https://img.shields.io/github/stars/leiting-eric/DailyBrief?style=social)](https://github.com/leiting-eric/DailyBrief)
 
-> **你的私人 AI 每日简报，跑在你自己掌控的基础设施上。** 默认启用 26 个数据源 · LLM 摘要 · 21 个股票/加密标的**技术指标 + AI 交易点评** · 中英双语 · 6 个 LLM 后端可选。
+> **你的私人 AI 每日简报，跑在你自己掌控的基础设施上。** 默认启用 62 个数据源 · LLM 摘要 · 21 个股票/加密标的**技术指标 + AI 交易点评** · 中英双语 · 6 个 LLM 后端可选。
 >
 > **三种部署任选**：[**🚀 5 分钟 Fork 到 GitHub Actions**](#a-github-actions--pages零基础设施推荐) · [**💻 本地一键装**](#b-本地一键装) · [**🤖 一句话让 AI Agent 帮你装**](#c-给-ai-agent-一句话装)。
 
@@ -25,7 +25,7 @@
 
 ## ✨ 核心特性
 
-- **🌍 全网多源聚合**：默认启用 26 个数据源，覆盖硅谷科技、AI 前沿、全球财经、国际时政、中文社区，一份报告通吃
+- **🌍 全网多源聚合**：默认启用 62 个数据源，覆盖硅谷科技、AI 前沿、全球财经、国际时政、中文社区，一份报告通吃
 - **📈 21 个标的实时行情**：美股 / 加密 / 港股 / 商品外汇 / 宏观信号，附 SMA / RSI / MACD 技术指标 + LLM 每日交易点评
 - **🤖 6 个 LLM 后端可插拔**：Claude CLI / Anthropic / OpenAI / DeepSeek / MiniMax / Zhipu，一个环境变量切换，不绑死任何家
 - **🌐 中英双语**：`REPORT_LOCALE=en` 一切——数据源、prompt、UI 文案、Bullish/Bearish stance 全套切英文
@@ -38,7 +38,7 @@
 
 ## 📚 信源图谱
 
-当前 registry 共 53 个源，默认启用 26 个；按 locale 过滤后 zh 模式有效 24 个、en 模式有效 23 个，分布如下：
+当前 registry 共 80 个源，默认启用 62 个；按 locale 过滤后 zh 模式有效 60 个、en 模式有效 50 个，分布如下：
 
 ### 🧑‍💻 技术动态
 
@@ -115,6 +115,8 @@
    - `REPORT_TZ` —— IANA 时区名（默认 UTC），例 `Asia/Shanghai` / `America/Los_Angeles`。**同时影响触发时间和日期标签**
    - `REPORT_HOUR` —— 触发的小时（基于 `REPORT_TZ`），默认 `8`（早 8 点）。逗号分隔可多次触发，如 `8,18` = 早 8 + 晚 6
    - `REPORT_DAYS` —— 触发的星期（cron 风格，`0`=周日 ... `6`=周六），默认 `*`（每天）。例 `1-5` = 工作日；`1,3,5` = 周一三五
+   - `FRESHRSS_API_URL` / `MINIFLUX_API_URL` —— 统一阅读器 API 地址。对应 token 必须放在 Secrets：`FRESHRSS_API_TOKEN` / `MINIFLUX_API_TOKEN`
+   - `READER_FETCH_LIMIT` —— 每个阅读器栏目获取文章上限，默认 `30`
 6. **Actions 标签 → 选 "Daily Brief" workflow → Run workflow** 手动触发一次
 
 跑完后报告在 `https://<你的用户名>.github.io/<repo-名字>/`。之后**默认每天 `REPORT_TZ` 时区的 08:00 自动更新**（不设 `REPORT_TZ` 就是 UTC 08:00）。
@@ -251,6 +253,12 @@ node scripts/install.mjs --global
 | `npm run quota-report` | 看各 LLM backend 用量统计 | 即时 |
 | `npm run sources` | 列出所有数据源（按 locale 标注启用/过滤状态）| 即时 |
 | `npm run sources:check` | 仅校验 `sources.config.json` schema（适合 CI / pre-commit）| 即时 |
+| `npm run network:check` | 检查外网与可选代理连通性，不调用 LLM | ~5 秒 |
+| `npm run check` | 类型检查、源配置校验与单元测试 | 即时 |
+
+运行结果会在当日目录写入 `source-health.json`，包含每个源的重试次数、耗时和失败原因。默认低于 60% 源成功率或任一板块低于 80% LLM 摘要覆盖率时不发布；可通过 `.env.local` 的 `SOURCE_*` 与 `MIN_ENRICHMENT_COVERAGE` 配置。
+
+若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这两类诊断 artifact 14 天。
 
 ---
 
@@ -262,7 +270,10 @@ node scripts/install.mjs --global
 |---|---|---|
 | `id` | ✓ | 全局唯一短标识（dispatch.ts 用 id 路由到对应 fetcher）|
 | `name` | ✓ | UI 显示名 |
-| `type` | ✓ | `rss` / `api` / `scrape` |
+| `type` | ✓ | `rss` / `api` / `scrape` / `reader` |
+| `provider` |  | `reader` 类型必填：`freshrss` / `miniflux`；省略表示本机直连 |
+| `providerSourceId` |  | 阅读器的 stream/label（FreshRSS）或 feed ID（Miniflux） |
+| `tier` |  | `core` / `standard` / `supplement`，用于来源健康统计；默认 `standard` |
 | `url` | ✓ | RSS feed 或 API endpoint |
 | `category` | ✓ | `tech` / `finance` / `politics`，决定 L1 tab |
 | `subcategory` |   | `tech` 下的 L2 分组（`github-trending` / `ai-news` / `x-viral` / `cn-community`）；`finance` 下统一 `news` |
@@ -278,6 +289,17 @@ node scripts/install.mjs --global
 2. 跑 `npm run sources:check` 校验 schema
 3. `npm run dry-run` 抓一次验证拉取正常
 4. 下次 `npm run daily` 自动包含
+
+### 统一阅读器接入（推荐用于媒体 RSS）
+
+不要让本机日报任务直抓大量媒体站。推荐将订阅交给网络稳定环境中的 FreshRSS 或 Miniflux：它负责轮询、缓存和失败恢复，DailyBrief 只从它的 API 读取增量文章。
+
+1. 在 FreshRSS 中按 `technology`、`finance`、`world` 建立标签，并导入公开或授权订阅。
+2. 在 `.env.local` 设置 `FRESHRSS_API_URL`、`FRESHRSS_API_TOKEN`；字段示例见 `.env.example`。
+3. 将 `sources.config.json` 中对应的 `freshrss-*` 模板设为 `enabled: true`，并把 `providerSourceId` 改为实际标签/stream。
+4. 保留官方 API/RSS 为核心事实源；将不稳定媒体直连源降为补充或关闭。
+
+Miniflux 也可通过 `MINIFLUX_API_URL`、`MINIFLUX_API_TOKEN` 使用；每个 `reader` 来源的 `providerSourceId` 可指定一个 feed ID。运行后 `source-health.json` 会额外输出 `providers` 汇总及底层网络错误码。
 
 ### 🌐 Locale 模式（zh / en）
 
@@ -639,6 +661,8 @@ The registry currently contains 53 sources, with 26 enabled by default. After lo
    Location: **Settings → Secrets and variables → Actions**. The page has two tabs — **Secrets** for keys, **Variables** for `LLM_BACKEND`.
 
    > 🌀 **Extras if you picked the last "proxy" row**: also add `LLM_BASE_URL` (the endpoint your proxy gave you, e.g. `https://api.moonshot.cn/v1`) and `LLM_MODEL` (e.g. `moonshot-v1-8k`) under Variables. Not sure which protocol? Default `LLM_BACKEND=openai` — covers 95% of proxies; switch to `anthropic` only if you get 404s or protocol errors.
+
+   > **Reader provider (optional)**: add `FRESHRSS_API_URL` or `MINIFLUX_API_URL` under Variables, and the matching `FRESHRSS_API_TOKEN` or `MINIFLUX_API_TOKEN` under Secrets. Keep the corresponding `reader` sources disabled until the remote reader has ingested and been verified against your feeds.
 
 5. (Optional) On the same Variables tab, add:
    - `LLM_MODEL` — override the backend's default model (otherwise uses the default listed in [`.env.example`](.env.example))
