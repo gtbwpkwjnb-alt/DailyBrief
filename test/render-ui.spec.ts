@@ -14,6 +14,8 @@ const report: DailyReport = {
 };
 
 test("report renders a usable tech panel without unsafe links", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   const article: ArticleInput = {
     sourceId: "github-trending",
     source: "GitHub Trending",
@@ -34,5 +36,6 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   await expect(page.locator(".article-excerpt")).toHaveCount(0);
   await expect(page.locator(".article-importance")).toContainText("8/10");
   await expect(page.locator("#runDailyButton")).toBeVisible();
+  expect(pageErrors).toEqual([]);
   expect((await page.screenshot()).byteLength).toBeGreaterThan(1_000);
 });

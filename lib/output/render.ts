@@ -1996,7 +1996,7 @@ export function renderHtml(
       if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(progress));
       button.disabled = state.status === 'running';
       if (Array.isArray(state.logs) && state.logs.length) {
-        log.textContent = state.logs.slice(-12).join('\n');
+        log.textContent = state.logs.slice(-12).join('\\n');
         log.classList.add('visible');
         log.scrollTop = log.scrollHeight;
       }
