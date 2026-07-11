@@ -12,6 +12,8 @@ const articleSchema = z.object({
   excerpt: z.string().optional(),
   publishedAt: z.string().datetime().optional(),
   summary: z.string().optional(),
+  displayTitle: z.string().optional(),
+  importance: z.number().min(1).max(10).optional(),
   meta: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });

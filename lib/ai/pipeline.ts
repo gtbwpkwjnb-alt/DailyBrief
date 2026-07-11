@@ -214,11 +214,11 @@ function fallbackDigest(articles: ArticleInput[]): DailyReport {
 
   const toBriefs = (items: ArticleInput[], limit: number): BriefItem[] =>
     items.slice(0, limit).map((a) => ({
-      title: a.title,
+      title: a.displayTitle ?? a.title,
       url: a.url,
       source: a.source,
       summary: a.summary ?? a.excerpt ?? "",
-      importance: 5,
+      importance: a.importance ?? 5,
     }));
 
   return {
@@ -234,6 +234,28 @@ function fallbackDigest(articles: ArticleInput[]): DailyReport {
     editor_note: "",
     keywords: [],
   };
+}
+
+function ensureSourceDiversity(
+  briefs: BriefItem[],
+  candidates: ArticleInput[],
+): BriefItem[] {
+  if (briefs.length < 2 || new Set(briefs.map((brief) => brief.source)).size >= 2) return briefs;
+  const primarySource = briefs[0]?.source;
+  const usedUrls = new Set(briefs.map((brief) => brief.url));
+  const replacement = candidates
+    .filter((article) => article.summary && article.source !== primarySource && !usedUrls.has(article.url))
+    .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))[0];
+  if (!replacement) return briefs;
+  const diversified = [...briefs];
+  diversified[diversified.length - 1] = {
+    title: replacement.displayTitle ?? replacement.title,
+    url: replacement.url,
+    source: replacement.source,
+    summary: replacement.summary ?? "",
+    importance: replacement.importance ?? 5,
+  };
+  return diversified;
 }
 
 export async function generateDailyReport(
@@ -253,11 +275,11 @@ export async function generateDailyReport(
 
   const userPayload = compact.map((a, i) => ({
     n: i + 1,
-    title: a.title,
+    title: a.displayTitle ?? a.title,
     url: a.url,
     source: a.source,
     category: a.category,
-    excerpt: (a.excerpt ?? "").slice(0, 200),
+    excerpt: (a.summary ?? a.excerpt ?? "").slice(0, 160),
     published: a.publishedAt?.toISOString() ?? "",
   }));
   const userPayloadJson = JSON.stringify(userPayload);
@@ -288,6 +310,10 @@ export async function generateDailyReport(
       report = fallbackDigest(articles);
     }
   }
+
+  report.tech_briefs = ensureSourceDiversity(report.tech_briefs, grouped.tech);
+  report.finance_briefs = ensureSourceDiversity(report.finance_briefs, grouped.finance);
+  report.politics_briefs = ensureSourceDiversity(report.politics_briefs, grouped.politics);
 
   // Max subscription has no per-call token meter — we expose 0 for schema
   // compatibility; consumers should treat 0 as "metric not available".

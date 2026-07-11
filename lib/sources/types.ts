@@ -82,6 +82,13 @@ export interface RawArticle {
    */
   summary?: string;
   /**
+   * LLM-generated title in the active report locale. The original feed title
+   * remains intact for deduplication, attribution, and the outbound link.
+   */
+  displayTitle?: string;
+  /** LLM-assigned editorial importance score, from 1 (low) to 10 (highest). */
+  importance?: number;
+  /**
    * Structured one-line metadata to display above the excerpt — currently
    * used by GitHub Trending for "Language · ★stars · forks · stars today".
    */

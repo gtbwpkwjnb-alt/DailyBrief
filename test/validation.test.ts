@@ -54,11 +54,19 @@ test("consolidated result ignores unrequested URLs and applies defaults", () => 
     ],
   }, ["https://example.com/a"]);
   assert.deepEqual(result.get("https://example.com/a"), {
+    displayTitle: undefined,
     summary: "summary",
     tags: [],
     importance: 5,
   });
   assert.equal(result.has("https://example.com/other"), false);
+});
+
+test("consolidated result preserves the translated display title", () => {
+  const result = parseConsolidatedResult({
+    items: [{ url: "https://example.com/a", displayTitle: "中文标题", summary: "中文摘要" }],
+  }, ["https://example.com/a"]);
+  assert.equal(result.get("https://example.com/a")?.displayTitle, "中文标题");
 });
 
 test("report sidecar validates data and restores publication timestamps", () => {

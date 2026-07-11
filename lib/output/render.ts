@@ -176,12 +176,12 @@ const SUBCATEGORY_ORDER: Partial<Record<Category, string[]>> = {
   // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
   // overseas-community (Hacker News / r/stocks).
 	  trending: ["google-trends", "cn-trending", "reddit-trending"],
-  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "blog-weekly", "cn-community", "overseas-community"],
+  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "overseas-news", "overseas", "blog-weekly", "cn-community", "overseas-community"],
   finance: ["news"],
   politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
 };
 
-const TECH_MAIN_SUBS = new Set(["github-trending", "trending-papers", "x-viral", "ai-news"]);
+const TECH_MAIN_SUBS = new Set(["github-trending", "trending-papers", "x-viral", "ai-news", "overseas-news", "overseas", "blog-weekly"]);
 const TECH_COMMUNITY_SUBS = new Set(["cn-community", "overseas-community"]);
 
 const SUBCATEGORY_LABELS: Record<string, string> = {
@@ -194,6 +194,8 @@ const SUBCATEGORY_LABELS: Record<string, string> = {
   "overseas-community": STR.subOverseasCommunity,
   "ai-news": STR.subAiNews,
   "x-viral": STR.subXViral,
+  "overseas-news": REPORT_LOCALE === "en" ? "Technology News" : "海外科技",
+  overseas: REPORT_LOCALE === "en" ? "Industry Media" : "产业媒体",
   "blog-weekly": STR.subBlogWeekly,
   news: STR.subFinanceNews,
   uk: "🇬🇧 英国",
@@ -215,10 +217,11 @@ const SUBCATEGORY_LABELS: Record<string, string> = {
  * finance:news, politics:world) ignore this — they use MERGED_SUBGROUP_LIMITS.
  */
 const SOURCE_DISPLAY_LIMITS: Record<string, number> = {
-  "tech:github-trending": 20,
+  "tech:github-trending": 10,
   "tech:cn-community": 10,
-  "tech:x-viral": 20,
-  "tech:trending-papers": 20,
+  "tech:overseas-community": 10,
+  "tech:x-viral": 8,
+  "tech:trending-papers": 10,
 };
 
 /**
@@ -257,16 +260,18 @@ export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
 	  "trending:google-trends": 10,
 	  "trending:cn-trending": 10,
 	  "trending:reddit-trending": 10,
-	  "tech:ai-news": 15,
-	  "tech:blog-weekly": 10,
+	  "tech:ai-news": 12,
+	  "tech:overseas-news": 10,
+	  "tech:overseas": 10,
+	  "tech:blog-weekly": 6,
 	  "finance:news": 12,
-	  "politics:uk": 15,
-	  "politics:us": 15,
-	  "politics:france": 15,
-	  "politics:japan": 15,
-	  "politics:india": 15,
-	  "politics:east-asia": 15,
-	  "politics:other": 15,
+	  "politics:uk": 6,
+	  "politics:us": 6,
+	  "politics:france": 6,
+	  "politics:japan": 6,
+	  "politics:india": 6,
+	  "politics:east-asia": 6,
+	  "politics:other": 6,
 };
 
 /**
@@ -486,13 +491,14 @@ function formatDate(d: Date | undefined): string {
 // ----- raw article renderers -----
 
 function renderArticleHtml(a: ArticleInput, showSource = false): string {
-  const title = escapeHtml(a.title);
+  const title = escapeHtml(a.displayTitle ?? a.title);
   const externalUrl = safeExternalUrl(a.url);
   const url = externalUrl ? escapeHtml(externalUrl) : "";
   const excerpt = a.excerpt ? escapeHtml(a.excerpt) : "";
   // Backwards-compat: old sidecar JSON files may carry `cnSummary` instead.
   const summaryText = a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary;
   const summary = summaryText ? escapeHtml(summaryText) : "";
+  const importance = Number.isFinite(a.importance) ? Math.max(1, Math.min(10, Math.round(a.importance!))) : null;
   const stats = a.meta ? escapeHtml(a.meta) : "";
   const time = formatDate(a.publishedAt);
   const sourceLabel = showSource && a.source ? escapeHtml(a.source) : "";
@@ -519,13 +525,13 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const tagAttr = tags ? ` data-tags="${escapeHtml(tags.join(","))}"` : "";
 
   return `<article class="article"${tagAttr}>
-    ${metaHtml ? `<p class="article-meta">${metaHtml}</p>` : ""}
+    ${metaHtml || importance ? `<p class="article-meta">${metaHtml}${metaHtml && importance ? " · " : ""}${importance ? `<span class="article-importance importance-${importance >= 8 ? "high" : importance >= 5 ? "mid" : "low"}">${REPORT_LOCALE === "en" ? "Importance" : "重要度"} ${importance}/10</span>` : ""}</p>` : ""}
     ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>` : ""}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
     ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
     ${tags ? `<p class="article-tags">${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</p>` : ""}
-    ${excerpt ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
-    ${url && (metaHtml || showTitle) ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${title}">🔗</a>` : ""}
+    ${excerpt && !(REPORT_LOCALE === "zh" && summary) ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
+    ${url && (metaHtml || showTitle) ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${escapeHtml(a.title)}">🔗</a>` : ""}
   </article>`;
 }
 
@@ -730,14 +736,18 @@ export function renderHtml(
 	  };
   const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
   const failedHtml = failedSources && failedSources.length > 0
-    ? `<section class="failed-sources">
-    <p class="failed-sources-heading">${REPORT_LOCALE === "en" ? "Failed Sources" : "抓取失败源"}</p>
+    ? `<details class="failed-sources">
+    <summary class="failed-sources-heading">${REPORT_LOCALE === "en" ? "Failed Sources" : "抓取失败源"}<span>${failedSources.length}</span></summary>
     ${failedSources.map((f) => `<div class="failed-source-item">
       <span class="failed-source-name">${escapeHtml(f.name)}</span>
       <span class="failed-source-reason" title="${escapeHtml(f.reason)}">${escapeHtml(f.reason.length > 60 ? f.reason.slice(0, 60) + "..." : f.reason)}</span>
       <button class="refetch-btn" data-source-id="${escapeHtml(f.id)}">${REPORT_LOCALE === "en" ? "Refetch" : "重新抓取"}</button>
     </div>`).join("")}
-  </section>`
+  </details>`
+    : "";
+  const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
+  const actionsUrl = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepository)
+    ? `https://github.com/${githubRepository}/actions/workflows/daily.yml`
     : "";
 
   return `<!doctype html>
@@ -1170,6 +1180,74 @@ export function renderHtml(
   .article-title a { color: var(--fg); text-decoration: none; transition: color 0.15s; }
   .article-title a:hover { color: var(--link); }
   .article-meta { color: var(--muted); font-size: 0.74rem; margin: 0 0 0.3rem; }
+  .article-importance {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.25rem;
+    padding: 0.05rem 0.42rem;
+    border-radius: 0.3rem;
+    font-size: 0.66rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .run-console {
+    margin: 0.85rem 0 1.25rem;
+    padding: 0.8rem 0;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .run-console-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .run-button {
+    width: 2.35rem;
+    height: 2.35rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .run-button:disabled { opacity: 0.55; cursor: wait; }
+  .run-status-copy { min-width: 0; }
+  .run-status-label { margin: 0; font-size: 0.78rem; font-weight: 700; color: var(--fg); }
+  .run-status-detail { margin: 0.1rem 0 0; font-size: 0.7rem; color: var(--muted); }
+  .run-progress-value { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .run-progress-track {
+    height: 0.3rem;
+    margin-top: 0.6rem;
+    overflow: hidden;
+    background: var(--card);
+    border-radius: 0.2rem;
+  }
+  .run-progress-bar {
+    width: 0;
+    height: 100%;
+    background: var(--link);
+    transition: width 0.35s ease;
+  }
+  .run-log {
+    display: none;
+    max-height: 8rem;
+    overflow: auto;
+    margin: 0.65rem 0 0;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.35rem;
+    background: var(--bg-elevated);
+    color: var(--fg-soft);
+    font: 0.68rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap;
+  }
+  .run-log.visible { display: block; }
+  .article-importance.importance-high { background: var(--rank-high-bg); color: var(--rank-high-fg); }
+  .article-importance.importance-mid { background: var(--rank-mid-bg); color: var(--rank-mid-fg); }
+  .article-importance.importance-low { background: var(--rank-low-bg); color: var(--rank-low-fg); }
   .article-stats {
     color: var(--muted);
     font-size: 0.78rem;
@@ -1425,6 +1503,14 @@ export function renderHtml(
     letter-spacing: 0.1em;
     color: #d97706;
     margin: 0 0 0.5rem;
+  }
+  summary.failed-sources-heading { cursor: pointer; list-style: none; }
+  summary.failed-sources-heading::-webkit-details-marker { display: none; }
+  summary.failed-sources-heading span {
+    margin-left: 0.45rem;
+    color: var(--muted);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
   }
   .failed-source-item {
     display: flex;
@@ -1830,6 +1916,21 @@ export function renderHtml(
       ${process.env.WEB_MODE === "true" ? `<a class="archive-link" href="../archive.html">${STR.archiveLink}</a>` : ""}
   </header>
 
+  <section class="run-console" data-actions-url="${escapeHtml(actionsUrl)}" data-github-repository="${escapeHtml(githubRepository)}">
+    <div class="run-console-head">
+      <button class="run-button" id="runDailyButton" type="button" title="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}" aria-label="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}">▶</button>
+      <div class="run-status-copy">
+        <p class="run-status-label" id="runStatusLabel">${REPORT_LOCALE === "en" ? "Ready" : "等待运行"}</p>
+        <p class="run-status-detail" id="runStatusDetail">${REPORT_LOCALE === "en" ? "Local service runs directly; Pages opens GitHub Actions" : "本地服务直接运行；Pages 跳转 GitHub Actions"}</p>
+      </div>
+      <span class="run-progress-value" id="runProgressValue">0%</span>
+    </div>
+    <div class="run-progress-track" role="progressbar" aria-label="${REPORT_LOCALE === "en" ? "Run progress" : "运行进度"}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="run-progress-bar" id="runProgressBar"></div>
+    </div>
+    <pre class="run-log" id="runLog" aria-live="polite"></pre>
+  </section>
+
   ${tagCloudHtml}
 
   ${failedHtml}
@@ -1867,6 +1968,87 @@ export function renderHtml(
   </footer>
 </main>
 <script>
+  (function () {
+    var consoleEl = document.querySelector('.run-console');
+    var button = document.getElementById('runDailyButton');
+    var label = document.getElementById('runStatusLabel');
+    var detail = document.getElementById('runStatusDetail');
+    var value = document.getElementById('runProgressValue');
+    var bar = document.getElementById('runProgressBar');
+    var log = document.getElementById('runLog');
+    var progressTrack = consoleEl ? consoleEl.querySelector('[role="progressbar"]') : null;
+    if (!consoleEl || !button || !label || !detail || !value || !bar || !log) return;
+    var actionsUrl = consoleEl.dataset.actionsUrl || '';
+    var repository = consoleEl.dataset.githubRepository || '';
+    var isPages = /\.github\.io$/i.test(location.hostname);
+    var timer = null;
+
+    function renderStatus(state) {
+      var progress = Math.max(0, Math.min(100, Number(state.progress || 0)));
+      label.textContent = state.stage || (state.status === 'running' ? '\u8fd0\u884c\u4e2d' : '\u7b49\u5f85\u8fd0\u884c');
+      detail.textContent = state.status === 'running'
+        ? '\u6b63\u5728\u6536\u96c6\u3001\u6574\u7406\u3001\u7ffb\u8bd1\u548c\u5ba1\u6838\u4fe1\u606f'
+        : state.status === 'success' ? '\u65e5\u62a5\u5df2\u751f\u6210\uff0c\u5237\u65b0\u9875\u9762\u67e5\u770b'
+        : state.status === 'error' ? '\u8fd0\u884c\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u65e5\u5fd7'
+        : detail.textContent;
+      value.textContent = progress + '%';
+      bar.style.width = progress + '%';
+      if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(progress));
+      button.disabled = state.status === 'running';
+      if (Array.isArray(state.logs) && state.logs.length) {
+        log.textContent = state.logs.slice(-12).join('\n');
+        log.classList.add('visible');
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+
+    function pollLocal() {
+      fetch('/api/run/status', { cache: 'no-store' })
+        .then(function (response) { if (!response.ok) throw new Error('status unavailable'); return response.json(); })
+        .then(function (state) {
+          renderStatus(state);
+          if (state.status === 'running') timer = setTimeout(pollLocal, 1200);
+        })
+        .catch(function () {});
+    }
+
+    function pollGithub() {
+      if (!repository) return;
+      fetch('https://api.github.com/repos/' + repository + '/actions/workflows/daily.yml/runs?per_page=1', { cache: 'no-store' })
+        .then(function (response) { if (!response.ok) throw new Error('GitHub status unavailable'); return response.json(); })
+        .then(function (payload) {
+          var run = payload.workflow_runs && payload.workflow_runs[0];
+          if (!run) return;
+          var running = run.status !== 'completed';
+          renderStatus({
+            status: running ? 'running' : run.conclusion === 'success' ? 'success' : 'error',
+            stage: running ? '\u8fdc\u7a0b\u4efb\u52a1\u8fd0\u884c\u4e2d' : run.conclusion === 'success' ? '\u8fdc\u7a0b\u4efb\u52a1\u5b8c\u6210' : '\u8fdc\u7a0b\u4efb\u52a1\u5931\u8d25',
+            progress: running ? 55 : 100,
+            logs: [run.name + ' · ' + run.status + (run.conclusion ? ' · ' + run.conclusion : '')],
+          });
+          if (running) timer = setTimeout(pollGithub, 5000);
+        })
+        .catch(function () {});
+    }
+
+    button.addEventListener('click', function () {
+      if (isPages) {
+        if (actionsUrl) window.open(actionsUrl, '_blank', 'noopener,noreferrer');
+        pollGithub();
+        return;
+      }
+      button.disabled = true;
+      fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function (response) { return response.json(); })
+        .then(function (state) { renderStatus(state); pollLocal(); })
+        .catch(function () {
+          button.disabled = false;
+          renderStatus({ status: 'error', stage: '\u65e0\u6cd5\u542f\u52a8', progress: 0, logs: ['\u8bf7\u5148\u8fd0\u884c npm run serve'] });
+        });
+    });
+    if (isPages) pollGithub(); else pollLocal();
+  })();
+
   document.querySelectorAll('.tabs > .tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var target = btn.dataset.tab;

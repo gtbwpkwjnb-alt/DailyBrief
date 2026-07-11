@@ -33,11 +33,11 @@
     "url": "https://linux.do/top.rss?period=daily",
     "category": "tech",
     "subcategory": "cn-community",
-    "enabled": true,
+    "enabled": false,
     "locales": [
       "zh"
     ],
-    "notes": "Discourse RSS feed; fetcher falls back to /latest.rss if /top.rss fails",
+    "notes": "Disabled after repeated timeout/XML challenge failures; V2EX, Huxiu and 36Kr provide the stable Chinese-community fallback.",
     "priority": 4
   },
   {
@@ -49,9 +49,10 @@
     "subcategory": "overseas-community",
     "enabled": true,
     "locales": [
+      "zh",
       "en"
     ],
-    "priority": 3
+    "priority": 5
   },
   {
     "id": "lobsters",
@@ -317,7 +318,7 @@
     "url": "https://github.blog/engineering/feed/",
     "category": "tech",
     "subcategory": "blog-weekly",
-    "enabled": false,
+    "enabled": true,
     "locales": [
       "zh",
       "en"
@@ -800,12 +801,13 @@
     "url": "https://asia.nikkei.com/rss/feed",
     "category": "politics",
     "subcategory": "east-asia",
-    "enabled": true,
+    "enabled": false,
     "locales": [
       "zh",
       "en"
     ],
-    "priority": 4
+    "priority": 2,
+    "notes": "Disabled: RSS endpoint returned HTTP 404 in GitHub Actions on 2026-07-11."
   },
   {
     "id": "ap-world",

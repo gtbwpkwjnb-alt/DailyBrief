@@ -439,6 +439,9 @@ async function runEnrichment(
   const userPrompt = [
     langHeader,
     "",
+    REPORT_LOCALE === "en"
+      ? "Every item must contain displayTitle, summary, tags, and importance."
+      : "每个 item 必须包含 displayTitle、summary、tags、importance。",
     USER_PROMPT_HEADER(payload.length),
     JSON.stringify(payload),
     "",
@@ -785,12 +788,16 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 - Google 热搜关键词 → 翻译为中文并说明为何热门（即使无说明也至少有"XX热搜词"）
 - 即使信息不足，也至少有标题的中文翻译，**不允许遗漏任何条目**
 
-**2. 内容标签（必需）**
+**2. 中文展示标题（必需）**
+- displayTitle 必须是 12-30 字的中文标题，准确翻译或改写输入 title
+- 产品名、公司名、模型名可保留英文；不要保留整句英文标题
+
+**3. 内容标签（必需）**
 - 分配 3-5 个内容标签，前 1-2 个为基础分类（政治/经济/科技/体育/娱乐/军事/社会/教育/健康/环境/国际/财经/文化），后 2-3 个为具体内容标签
 - 标签从广到窄排序
 - 纯中文，不需要空格
 
-**3. 重要度评分（必需）**
+**4. 重要度评分（必需）**
 - 1-10 分，10 为最重要。基于：新闻影响力、时效性、与目标读者的相关性
 
 输出严格 JSON 对象，不要 markdown 包裹：
@@ -798,6 +805,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
   "items": [
     {
       "url": "<原 url，精确复制>",
+      "displayTitle": "<12-30 字中文标题>",
       "summary": "<50-90 字中文精炼摘要>",
       "tags": ["科技", "AI", "开源模型"],
       "importance": 7
@@ -824,11 +832,15 @@ Task: for each item, do ALL three:
 - Google Trends → explain why trending (or just translate)
 - **Do NOT skip any item. Every item must have a summary.**
 
-**2. Content tags (required)**
+**2. Display title (required)**
+- displayTitle must be a concise 8-16 word title in English
+- Translate non-English titles; retain product, company, and model names where appropriate
+
+**3. Content tags (required)**
 - 3-5 tags per item: 1-2 base category (Politics/Economy/Technology/Sports/Entertainment/Military/Society/Education/Health/Environment/International/Finance/Culture) + 2-3 specific tags
 - Order: broad to narrow
 
-**3. Importance score (required)**
+**4. Importance score (required)**
 - 1-10, 10 = most important. Based on: impact, timeliness, relevance
 
 Output STRICTLY a JSON object, no markdown:
@@ -836,6 +848,7 @@ Output STRICTLY a JSON object, no markdown:
   "items": [
     {
       "url": "<exact url from input>",
+      "displayTitle": "<8-16 word English title>",
       "summary": "<50-90 word English summary>",
       "tags": ["Technology", "AI", "open-source"],
       "importance": 7
@@ -861,18 +874,28 @@ const CONSOLIDATED_PROMPTS =
 export async function consolidatedEnrich(
   categoryLabel: string,
   items: EnrichInput[],
-): Promise<Map<string, { summary: string; tags: string[]; importance: number }>> {
+): Promise<Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>> {
   if (items.length === 0) return new Map();
 
-  const result = new Map<string, { summary: string; tags: string[]; importance: number }>();
-  const merge = (values: Map<string, { summary: string; tags: string[]; importance: number }>) => {
+  const batchSize = 15;
+  if (items.length > batchSize) {
+    const batched = new Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>();
+    for (let i = 0; i < items.length; i += batchSize) {
+      const partial = await consolidatedEnrich(categoryLabel, items.slice(i, i + batchSize));
+      for (const [url, value] of partial) batched.set(url, value);
+    }
+    return batched;
+  }
+
+  const result = new Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>();
+  const merge = (values: Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>) => {
     for (const [url, value] of values) result.set(url, value);
   };
 
   const langHeader =
     REPORT_LOCALE === "en"
-      ? "**Output language: ENGLISH ONLY.** Every summary must be in English."
-      : "**输出语言：仅中文。** 每个 summary 必须全部是中文。";
+      ? "**Output language: ENGLISH ONLY.** Every displayTitle and summary must be in English."
+      : "**输出语言：仅中文。** 每个 displayTitle 和 summary 必须全部是中文。";
 
   const userPrompt = [
     langHeader,
@@ -908,7 +931,10 @@ export async function consolidatedEnrich(
     }
   }
 
-  const missing = items.filter((item) => !result.has(item.url));
+  const missing = items.filter((item) => {
+    const value = result.get(item.url);
+    return !value?.displayTitle || !value.summary;
+  });
   for (let i = 0; i < missing.length; i += 10) {
     const batch = missing.slice(i, i + 10);
     const batchPrompt = buildConsolidatedPrompt(categoryLabel, batch, langHeader);
@@ -926,6 +952,9 @@ function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], la
   return [
     langHeader,
     "",
+    REPORT_LOCALE === "en"
+      ? "Every item must contain displayTitle, summary, tags, and importance."
+      : "每个 item 必须包含 displayTitle、summary、tags、importance。",
     `以下为今日「${categoryLabel}」板块的 ${items.length} 条条目：`,
     JSON.stringify(items.map((it) => ({
       url: it.url,
@@ -945,8 +974,8 @@ async function runConsolidatedOnce(
   systemPrompt: string,
   userPrompt: string,
   scope: string,
-): Promise<Map<string, { summary: string; tags: string[]; importance: number }>> {
-  const result = new Map<string, { summary: string; tags: string[]; importance: number }>();
+): Promise<Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>> {
+  const result = new Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>();
 
   const { text } = await runLlm({
     systemPrompt,
@@ -996,6 +1025,8 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
 4. **重点突出**：重要度高的条目是否正确突出了？
 5. **改进建议**：如果有改进空间，给出具体建议。
 
+只有缺少摘要、板块来源单一、展示内容未翻译、存在无依据结论等发布级问题才设 passed=false；轻微文风建议必须保持 passed=true。
+
 输出严格 JSON 对象：
 {
   "passed": true/false,
@@ -1014,6 +1045,10 @@ Check:
 3. **Diversity**: Are sources diverse? Over-reliance on a few sources?
 4. **Prioritization**: Are high-importance items properly highlighted?
 5. **Improvements**: Specific suggestions for improvement.
+
+Set passed=false only for publication-blocking issues such as missing summaries,
+single-source sections, untranslated display content, or unsupported claims.
+Minor stylistic suggestions must keep passed=true.
 
 Output STRICTLY JSON:
 {

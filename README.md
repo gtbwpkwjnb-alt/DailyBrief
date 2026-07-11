@@ -12,7 +12,7 @@
 [![Demo: live](https://img.shields.io/badge/demo-leiting--eric.github.io%2FDailyBrief-brightgreen.svg)](https://leiting-eric.github.io/DailyBrief)
 [![Stars](https://img.shields.io/github/stars/leiting-eric/DailyBrief?style=social)](https://github.com/leiting-eric/DailyBrief)
 
-> **你的私人 AI 每日简报，跑在你自己掌控的基础设施上。** 默认启用 62 个数据源 · LLM 摘要 · 21 个股票/加密标的**技术指标 + AI 交易点评** · 中英双语 · 6 个 LLM 后端可选。
+> **你的私人 AI 每日简报，跑在你自己掌控的基础设施上。** 默认启用 61 个数据源 · 可见条目 AI 摘要 · 21 个股票/加密标的**技术指标 + AI 交易点评** · 中英双语 · 6 个 LLM 后端可选。
 >
 > **三种部署任选**：[**🚀 5 分钟 Fork 到 GitHub Actions**](#a-github-actions--pages零基础设施推荐) · [**💻 本地一键装**](#b-本地一键装) · [**🤖 一句话让 AI Agent 帮你装**](#c-给-ai-agent-一句话装)。
 
@@ -25,7 +25,7 @@
 
 ## ✨ 核心特性
 
-- **🌍 全网多源聚合**：默认启用 62 个数据源，覆盖硅谷科技、AI 前沿、全球财经、国际时政、中文社区，一份报告通吃
+- **🌍 全网多源聚合**：默认启用 61 个数据源，覆盖硅谷科技、AI 前沿、全球财经、国际时政、中文社区，一份报告通吃
 - **📈 21 个标的实时行情**：美股 / 加密 / 港股 / 商品外汇 / 宏观信号，附 SMA / RSI / MACD 技术指标 + LLM 每日交易点评
 - **🤖 6 个 LLM 后端可插拔**：Claude CLI / Anthropic / OpenAI / DeepSeek / MiniMax / Zhipu，一个环境变量切换，不绑死任何家
 - **🌐 中英双语**：`REPORT_LOCALE=en` 一切——数据源、prompt、UI 文案、Bullish/Bearish stance 全套切英文
@@ -38,7 +38,7 @@
 
 ## 📚 信源图谱
 
-当前 registry 共 80 个源，默认启用 62 个；按 locale 过滤后 zh 模式有效 60 个、en 模式有效 50 个，分布如下：
+当前 registry 共 83 个源，默认启用 61 个；按 locale 过滤后 zh 模式有效 60 个、en 模式有效 50 个。
 
 ### 🧑‍💻 技术动态
 
@@ -256,7 +256,9 @@ node scripts/install.mjs --global
 | `npm run network:check` | 检查外网与可选代理连通性，不调用 LLM | ~5 秒 |
 | `npm run check` | 类型检查、源配置校验与单元测试 | 即时 |
 
-运行结果会在当日目录写入 `source-health.json`，包含每个源的重试次数、耗时和失败原因。默认低于 60% 源成功率或任一板块低于 80% LLM 摘要覆盖率时不发布；可通过 `.env.local` 的 `SOURCE_*` 与 `MIN_ENRICHMENT_COVERAGE` 配置。
+运行结果会在当日目录写入 `source-health.json`，包含来源、Provider、栏目成功率与非空产出率。默认低于 60% 来源成功率，或最终可见条目的本地化标题/摘要覆盖不足 100% 时不发布；可通过 `.env.local` 的 `SOURCE_*` 与 `MIN_ENRICHMENT_COVERAGE` 配置。
+
+本地执行 `npm run serve` 后，报告页的运行按钮可直接启动日报，并实时显示网络预检、来源抓取、翻译精炼、质量审核和写入进度。GitHub Pages 上的同一按钮跳转到仓库 Actions，页面通过公开 API 展示最近一次远端运行状态，不会在浏览器保存 GitHub Token。
 
 若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这两类诊断 artifact 14 天。
 
@@ -321,8 +323,8 @@ REPORT_LOCALE=zh    # 默认 — 中文 mode，含 V2EX / LinuxDo / DW 中文等
 
 | Locale | 启用源数 | 主要构成 |
 |---|---|---|
-| `zh` | 24 | 21 个全球英文源（附中文摘要）+ 3 个中文专属（V2EX / LinuxDo / DW 中文）|
-| `en` | 23 | 21 个全球英文源 + 2 个英文社区（Hacker News + r/stocks）|
+| `zh` | 60 | 全球科技、财经、时政、热搜与中文社区源，可见英文内容统一生成中文标题和摘要 |
+| `en` | 50 | 全球英文科技、财经、时政、热搜与社区源 |
 
 英文 mode 完整切换：HTML UI 文案、enrichment / digest / trading-commentary 三套 prompt、stance 词（"偏上行/偏下行/中性" → Bullish/Bearish/Neutral）、日期格式（zh-CN → en-GB）、Markdown 输出 —— 全部跟着 `REPORT_LOCALE` 切。**中文社区源在英文 mode 下被自动过滤掉**。
 
@@ -566,7 +568,7 @@ MIT
 [![Demo: live](https://img.shields.io/badge/demo-leiting--eric.github.io%2FDailyBrief-brightgreen.svg)](https://leiting-eric.github.io/DailyBrief)
 [![Stars](https://img.shields.io/github/stars/leiting-eric/DailyBrief?style=social)](https://github.com/leiting-eric/DailyBrief)
 
-> **Your own AI-curated daily news brief, on infrastructure you control.** 26 sources enabled by default · LLM summaries · 21-ticker market panel with SMA/RSI/MACD signals + AI commentary · bilingual (zh/en) · 6 swappable LLM backends.
+> **Your own AI-curated daily news brief, on infrastructure you control.** 61 sources enabled by default · AI summaries for every visible item · 21-ticker market panel with SMA/RSI/MACD signals + AI commentary · bilingual (zh/en) · 6 swappable LLM backends.
 >
 > **Three deployment paths, pick one:** [**🚀 5-min GitHub Actions fork**](#a-github-actions--pages-zero-infra-recommended) · [**💻 local one-liner install**](#b-local-one-liner-install) · [**🤖 have an AI agent install it for you**](#c-have-an-ai-agent-install-it-for-you).
 
@@ -579,7 +581,7 @@ MIT
 
 ## ✨ Core features
 
-- **🌍 Multi-source aggregation** — 26 sources enabled by default, spanning Silicon Valley tech, AI frontier, global finance, international politics, and developer communities. One report covers it all.
+- **🌍 Multi-source aggregation** — 61 sources enabled by default, spanning Silicon Valley tech, AI frontier, global finance, international politics, trends, and developer communities. One report covers it all.
 - **📈 21 live tickers** — US stocks / crypto / HK / commodities / macro signals, with SMA / RSI / MACD indicators + daily LLM-written trading commentary
 - **🤖 6 swappable LLM backends** — Claude CLI / Anthropic / OpenAI / DeepSeek / MiniMax / Zhipu. One env var to switch, no vendor lock-in.
 - **🌐 Bilingual (zh/en)** — set `REPORT_LOCALE=en` to flip the entire stack: sources, prompts, UI text, Bullish/Bearish stance labels — all switch.
@@ -592,7 +594,7 @@ MIT
 
 ## 📚 Source roster
 
-The registry currently contains 53 sources, with 26 enabled by default. After locale filtering, zh mode uses 24 active sources and en mode uses 23:
+The registry currently contains 83 sources, with 61 enabled by default. After locale filtering, zh mode uses 60 active sources and en mode uses 50.
 
 ### 🧑‍💻 Tech
 
@@ -855,8 +857,8 @@ Currently enabled sources by locale:
 
 | Locale | Enabled sources | Mix |
 |---|---|---|
-| `zh` | 24 | 21 global / English sources (with LLM-generated Chinese summaries) + 3 Chinese-only (V2EX / LinuxDo / DW Chinese) |
-| `en` | 23 | 21 global / English sources + 2 English community (Hacker News + r/stocks) |
+| `zh` | 60 | Global tech, finance, politics, trends, and Chinese community sources; visible English items receive localized Chinese titles and summaries |
+| `en` | 50 | Global English tech, finance, politics, trends, and community sources |
 
 The full en-mode switch covers: HTML UI text, the three LLM prompt sets (enrichment / digest / trading commentary), stance labels (Bullish/Bearish/Neutral vs. 偏上行/偏下行/中性), date format (`zh-CN` ↔ `en-GB`), Markdown output. **Chinese community sources are filtered out in en mode and replaced by en-only community sources** such as Hacker News and r/stocks.
 

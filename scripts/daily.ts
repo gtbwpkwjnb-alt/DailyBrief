@@ -19,7 +19,6 @@ import {
   enrichTrendingSummaries,
   enrichXViralSummaries,
   enrichContentTags,
-  enrichCategorySummary,
   consolidatedEnrich,
   aiReview,
   type EnrichInput,
@@ -743,12 +742,24 @@ async function main() {
     { key: "finance",  label: "财经要点", filter: (a: ArticleInput) => a.category === "finance" },
     { key: "politics", label: "国际时政", filter: (a: ArticleInput) => a.category === "politics" },
   ];
-  // Limit per category — keeping within LLM token limits.
-  // The old pipeline enriched ~15-50 items per category across many calls;
-  // consolidated calls need smaller batches for reasonable latency.
-  const CATEGORY_ITEM_LIMIT = 40;
+  // Enrich the exact articles that groupRaw will render. This avoids spending
+  // the budget on fetch-order items while visible cards remain untranslated.
+  const visibleRaw = groupRaw(articles, sources);
+  const visibleByCategory = new Map<string, ArticleInput[]>();
+  for (const category of Object.keys(visibleRaw) as Array<keyof typeof visibleRaw>) {
+    const seen = new Set<string>();
+    const visible = visibleRaw[category]
+      .flatMap((subgroup) => subgroup.sources)
+      .flatMap((source) => source.items)
+      .filter((article) => {
+        if (seen.has(article.url)) return false;
+        seen.add(article.url);
+        return true;
+      });
+    visibleByCategory.set(category, visible);
+  }
   const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
-    const items = articles.filter(cfg.filter).slice(0, CATEGORY_ITEM_LIMIT);
+    const items = visibleByCategory.get(cfg.key) ?? [];
     if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
     const t1 = Date.now();
     const results = await consolidatedEnrich(
@@ -758,12 +769,18 @@ async function main() {
     let matched = 0;
     for (const a of items) {
       const r = results.get(a.url);
-      if (r) { a.summary = r.summary; a.tags = r.tags; matched++; }
+      if (r?.displayTitle) {
+        a.displayTitle = r.displayTitle;
+        a.summary = r.summary;
+        a.tags = r.tags;
+        a.importance = r.importance;
+        matched++;
+      }
     }
     console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${items.length} enriched in ${((Date.now()-t1)/1000).toFixed(1)}s`);
     return { key: cfg.key, requested: items.length, enriched: matched };
   }));
-  const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 0.8);
+  const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 1);
   for (const category of enrichmentHealth) {
     if (category.requested === 0) continue;
     const coverage = category.enriched / category.requested;
@@ -792,8 +809,10 @@ async function main() {
   const base = path.join(dateDir, date);
   const raw = groupRaw(articles, sources);
 
-  // Phase 7: Category-level AI summaries (including community)
-  console.log(`[daily] generating category summaries…`);
+  // Phase 7: Deterministic category summaries from already-enriched visible
+  // items. This avoids five additional LLM calls and keeps the overview tied
+  // to exactly what the reader can inspect below.
+  console.log(`[daily] composing category summaries…`);
   const catSummaries: Record<string, string> = {};
   const catT0 = Date.now();
   // Build a lookup map for source subcategories
@@ -803,15 +822,17 @@ async function main() {
     { key: "community", label: "社区讨论", filter: (a: ArticleInput) =>
       ["cn-community", "overseas-community", "blog-weekly"].includes(sourceSubcat.get(a.sourceId) ?? "") },
   ];
-  await Promise.allSettled(SUMMARY_CONFIG.map(async (cfg) => {
-    const items = articles.filter((a) => cfg.filter(a) && !!a.summary).slice(0, 30);
-    if (items.length === 0) return;
-    const summary = await enrichCategorySummary(
-      cfg.label,
-      items.map((a) => ({ url: a.url, title: a.title, excerpt: a.summary, source: a.source })),
-    );
-    if (summary) catSummaries[cfg.key] = summary;
-  }));
+  for (const cfg of SUMMARY_CONFIG) {
+    const items = articles
+      .filter((a) => cfg.filter(a) && !!a.summary)
+      .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))
+      .slice(0, 3);
+    if (items.length === 0) continue;
+    catSummaries[cfg.key] = items
+      .map((article) => `${article.displayTitle ?? article.title}：${article.summary}`)
+      .join("；")
+      .slice(0, 320);
+  }
   const catMatched = SUMMARY_CONFIG.filter((c) => catSummaries[c.key]).length;
   console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${SUMMARY_CONFIG.length}`);
 
@@ -819,14 +840,18 @@ async function main() {
   console.log(`[daily] running AI quality review…`);
   const reviewT0 = Date.now();
   const reviewInput = CATEGORY_CONFIG.map((cfg) => {
-    const items = articles.filter((a) => cfg.filter(a) && !!a.summary).slice(0, 5);
-    const lines = items.map((a) => `  - [${a.source}] ${a.title}`);
+    const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
+    const lines = items.map((a) => `  - [${a.source}] [重要度 ${a.importance ?? 0}/10] ${a.displayTitle ?? a.title}：${a.summary}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);
   console.log(`[daily] AI review done in ${((Date.now() - reviewT0) / 1000).toFixed(1)}s — ${review.passed ? "✅ PASSED" : "⚠️ ISSUES FOUND"}`);
   if (review.issues.length > 0) {
     for (const issue of review.issues) console.warn(`  [review] ${issue}`);
+  }
+  if (!review.passed) {
+    appendRunLog(date, `blocked by AI quality review: ${review.issues.join("; ")}`);
+    throw new Error(`AI quality review did not pass: ${review.summary}`);
   }
 
   // Write output files

@@ -14,6 +14,7 @@ console.log("[serve] loading serve.ts v2");
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { loadAllSources } from "../lib/sources/registry";
@@ -26,14 +27,110 @@ import type { DailyReport, ArticleInput } from "../lib/ai/pipeline";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 const PORT = parseInt(process.env.SERVE_PORT || "3456", 10);
+const HOST = process.env.SERVE_HOST || "127.0.0.1";
 const REPORTS_DIR = path.resolve(PROJECT_ROOT, "daily_reports");
+
+type RunState = {
+  status: "idle" | "running" | "success" | "error";
+  stage: string;
+  progress: number;
+  startedAt?: string;
+  finishedAt?: string;
+  exitCode?: number;
+  logs: string[];
+};
+
+let runState: RunState = { status: "idle", stage: "等待运行", progress: 0, logs: [] };
+
+function stageFromLine(line: string): { stage: string; progress: number } | null {
+  if (line.includes("network preflight")) return { stage: "网络预检", progress: 5 };
+  if (line.includes("fetching sources")) return { stage: "收集信息源", progress: 10 };
+  if (line.includes("source health")) return { stage: "来源质量检查", progress: 35 };
+  if (line.includes("consolidated AI enrichment")) return { stage: "翻译与精炼", progress: 42 };
+  if (line.includes("enrichment done")) return { stage: "翻译与精炼", progress: 60 };
+  if (line.includes("analyzing watchlist")) return { stage: "市场数据分析", progress: 68 };
+  if (line.includes("generating digest")) return { stage: "生成每日摘要", progress: 76 };
+  if (line.includes("category summaries")) return { stage: "整理栏目观点", progress: 86 };
+  if (line.includes("quality review")) return { stage: "质量审核", progress: 93 };
+  if (line.includes("wrote daily_reports")) return { stage: "写入报告", progress: 98 };
+  if (line.includes("[daily] done")) return { stage: "完成", progress: 100 };
+  return null;
+}
+
+function appendRunOutput(chunk: string): void {
+  for (const rawLine of chunk.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    runState.logs.push(line);
+    if (runState.logs.length > 30) runState.logs.splice(0, runState.logs.length - 30);
+    const next = stageFromLine(line);
+    if (next && next.progress >= runState.progress) {
+      runState.stage = next.stage;
+      runState.progress = next.progress;
+    }
+  }
+}
+
+function startDailyRun(): void {
+  runState = {
+    status: "running",
+    stage: "启动任务",
+    progress: 2,
+    startedAt: new Date().toISOString(),
+    logs: [],
+  };
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const child = spawn(npmCommand, ["run", "daily"], {
+    cwd: PROJECT_ROOT,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.on("data", (chunk) => appendRunOutput(chunk.toString("utf8")));
+  child.stderr.on("data", (chunk) => appendRunOutput(chunk.toString("utf8")));
+  child.on("error", (error) => {
+    appendRunOutput(`启动失败: ${error.message}`);
+    runState = { ...runState, status: "error", stage: "启动失败", finishedAt: new Date().toISOString() };
+  });
+  child.on("close", (code) => {
+    const success = code === 0;
+    runState = {
+      ...runState,
+      status: success ? "success" : "error",
+      stage: success ? "运行完成" : "运行失败",
+      progress: success ? 100 : runState.progress,
+      exitCode: code ?? undefined,
+      finishedAt: new Date().toISOString(),
+    };
+  });
+}
+
+function isTrustedMutation(req: http.IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:")
+      && parsed.host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Find the latest report date directory.
  */
 function latestDateDir(): string | null {
   if (!fs.existsSync(REPORTS_DIR)) return null;
-  const dirs = fs.readdirSync(REPORTS_DIR).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse();
+  const dirs = fs.readdirSync(REPORTS_DIR)
+    .filter((date) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+      const base = path.join(REPORTS_DIR, date, date);
+      return fs.existsSync(`${base}.html`)
+        && fs.existsSync(`${base}.json`)
+        && fs.existsSync(`${base}-articles.json`);
+    })
+    .sort()
+    .reverse();
   return dirs[0] ?? null;
 }
 
@@ -71,8 +168,36 @@ const MIME_TYPES: Record<string, string> = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${PORT}`);
 
+  if (url.pathname === "/api/run/status" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(runState));
+    return;
+  }
+
+  if (url.pathname === "/api/run" && req.method === "POST") {
+    if (!isTrustedMutation(req)) {
+      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "Forbidden origin" }));
+      return;
+    }
+    if (runState.status === "running") {
+      res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(runState));
+      return;
+    }
+    startDailyRun();
+    res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(runState));
+    return;
+  }
+
   // ---- API: single-source refetch ----
   if (url.pathname.startsWith("/api/refetch/") && req.method === "POST") {
+    if (!isTrustedMutation(req)) {
+      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden origin" }));
+      return;
+    }
     const sourceId = decodeURIComponent(url.pathname.slice("/api/refetch/".length));
     const source = sourceById.get(sourceId);
     if (!source) {
@@ -152,11 +277,11 @@ const server = http.createServer(async (req, res) => {
   res.end(content);
 });
 
-server.listen(PORT, () => {
-  console.log(`[serve] DailyBrief dev server running at http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[serve] DailyBrief dev server running at http://${HOST}:${PORT}`);
   const latest = latestDateDir();
   if (latest) {
-    console.log(`[serve] Latest report: http://localhost:${PORT}/${latest}`);
+    console.log(`[serve] Latest report: http://${HOST}:${PORT}/${latest}`);
   } else {
     console.log(`[serve] No reports found in ${REPORTS_DIR}`);
   }
