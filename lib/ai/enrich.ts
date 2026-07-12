@@ -1,5 +1,5 @@
 import { jsonrepair } from "jsonrepair";
-import { parseConsolidatedResult } from "./consolidated-validation";
+import { parseConsolidatedResult, type ConsolidatedValue } from "./consolidated-validation";
 import { runLlm } from "./llm";
 import { extractJson } from "./json-util";
 import { REPORT_LOCALE } from "../sources/registry";
@@ -782,6 +782,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 任务：对每一条目执行以下三项操作：
 
 **1. 精炼摘要（必需）**
+- title 和 excerpt 是唯一事实依据；只能重述输入明确提供的信息，不得根据人物常识、外部知识或标题联想补充事实
 - 如果原文是英文 → 翻译为中文精炼摘要（50-90字），保留关键数字、人名、机构名、地名
 - 如果原文是中文 → 直接精炼摘要（50-90字），提高信息密度
 - GitHub 项目 → 说明项目做什么、用什么技术、解决什么问题
@@ -789,6 +790,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 - 论文 → 说明解决的问题、方法、关键结果
 - Google/微博/百度热搜关键词 → 翻译为中文并说明搜索热度；只能写“热搜词/搜索热度”，不能把关键词改写成已经确认发生的赛事、比分或事件
 - 即使信息不足，也至少有标题的中文翻译，**不允许遗漏任何条目**
+- 原文没有提供死亡、逮捕、比分、日期、辞职、停火等细节时，绝对不要写出这些结论
 
 **2. 中文展示标题（必需）**
 - displayTitle 必须是 12-30 字的中文标题，准确翻译或改写输入 title
@@ -834,6 +836,7 @@ Input: each item has url, title, excerpt, source, and category.
 Task: for each item, do ALL three:
 
 **1. Refined summary (required)**
+- title and excerpt are the sole evidence; restate only information explicitly present in them, never add outside knowledge or infer facts from a name
 - If content is non-English → translate key info to English (50-90 words)
 - If already English → condense to higher density (50-90 words)
 - Keep: key numbers, people/institution names, locations
@@ -842,6 +845,7 @@ Task: for each item, do ALL three:
 - Papers → problem, method, key result
 - Google Trends / hot-search keywords → explain search interest; never turn a keyword into a verified event, competition result, score, or date
 - **Do NOT skip any item. Every item must have a summary.**
+- If the input does not state a death, arrest, score, date, resignation, or ceasefire, do not assert one.
 
 **2. Display title (required)**
 - displayTitle must be a concise 8-16 word title in English
@@ -1025,7 +1029,15 @@ async function runConsolidatedOnce(
     parsed = JSON.parse(jsonrepair(cleaned)) as unknown;
   }
   const validated = parseConsolidatedResult(parsed, items.map((item) => item.url));
-  for (const [url, value] of validated) result.set(url, value);
+  for (const [url, value] of validated) {
+    const item = items.find((candidate) => candidate.url === url);
+    const unsupported = item ? hasUnsupportedHighRiskClaim(item, value) : null;
+    if (unsupported) {
+      console.warn(`[enrich] rejected unsupported ${unsupported} claim for ${url}`);
+      continue;
+    }
+    result.set(url, value);
+  }
 
   // Diagnostic for undercount
   if (result.size < items.length / 2 && items.length >= 3) {
@@ -1046,11 +1058,43 @@ async function runConsolidatedOnce(
 	  return result;
 	}
 
+const HIGH_RISK_EVIDENCE_RULES: Array<{ output: RegExp; source: RegExp; label: string }> = [
+  {
+    output: /病逝|去世|死亡|身亡|遇害|被杀|died|dead|death|killed|passed away|assassinated/i,
+    source: /病逝|去世|死亡|身亡|遇害|被杀|died|dead|death|killed|passed away|assassinated/i,
+    label: "死亡/遇害",
+  },
+  {
+    output: /逮捕|被捕|拘留|arrested|detained|taken into custody/i,
+    source: /逮捕|被捕|拘留|arrested|detained|taken into custody/i,
+    label: "逮捕/拘留",
+  },
+  {
+    output: /辞职|下台|被解职|resigned|stepped down|removed from office/i,
+    source: /辞职|下台|被解职|resigned|stepped down|removed from office/i,
+    label: "辞职/解职",
+  },
+  {
+    output: /\b\d+\s*(?:比|[-:]|to)\s*\d+\b|比分|夺冠|score(?:d)?|won the (?:match|final)/i,
+    source: /\b\d+\s*(?:比|[-:]|to)\s*\d+\b|比分|夺冠|score(?:d)?|won the (?:match|final)/i,
+    label: "比分/赛果",
+  },
+];
+
+export function hasUnsupportedHighRiskClaim(item: EnrichInput, value: ConsolidatedValue): string | null {
+  const output = `${value.displayTitle ?? ""} ${value.summary}`;
+  const source = `${item.title} ${item.excerpt ?? ""}`;
+  for (const rule of HIGH_RISK_EVIDENCE_RULES) {
+    if (rule.output.test(output) && !rule.source.test(source)) return rule.label;
+  }
+  return null;
+}
+
 // ----- AI Review: quality check before publishing -----
 
 const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负责审阅即将发布的日报，确保内容质量。
 
-输入：今日日报的摘要结构，包含各板块的条目（标题、来源、AI摘要、标签、重要度）。
+输入：今日日报的摘要结构，包含各板块的条目（原始标题、原文摘录、来源、AI摘要、标签、重要度）。原始标题和原文摘录是唯一事实证据，不得使用外部常识替输入补事实。
 
 审核要点：
 1. **覆盖度**：各板块（热搜趋势/技术动态/财经要点/国际时政）是否都有内容？是否有明显缺失的领域？
@@ -1059,9 +1103,10 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
 4. **重点突出**：重要度高的条目是否正确突出了？
 5. **事实核验**：特别检查日期、赛事、比分、人物、国家关系和“热搜词”是否被错误改写成已确认事实；热搜只能说明搜索热度，不能证明事件发生。
 6. **国际时政**：媒体所属国与文章涉及国是否区分；同一冲突、声明或行动的重复条目是否应合并。
-7. **改进建议**：如果有改进空间，给出具体建议。
+7. **发布阻断条件**：只有原文不支持的严重事实结论、明显编造、缺少摘要、未翻译或整栏不可用才设 passed=false。
+8. **非阻断问题**：重复事件、热搜措辞偏猜测、单条题材关联弱、来源比例不理想，写入 suggestions，不要因此设 passed=false。
 
-只有缺少摘要、板块来源单一、展示内容未翻译、存在无依据结论等发布级问题才设 passed=false；轻微文风建议必须保持 passed=true。
+只有缺少摘要、展示内容未翻译、存在无依据结论等发布级问题才设 passed=false；轻微文风建议和可优化的重复必须保持 passed=true。
 
 输出严格 JSON 对象：
 {
@@ -1075,6 +1120,8 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
 
 const AI_REVIEW_SYSTEM_PROMPT_EN = `You are a daily report quality reviewer. Review the content before publishing.
 
+Input: each item has the original title and excerpt. Treat them as the sole evidence; do not use outside knowledge to fill gaps.
+
 Check:
 1. **Coverage**: Does each section have content? Any obvious gaps?
 2. **Quality**: Are summaries concise and accurate? Any fabricated content?
@@ -1082,10 +1129,12 @@ Check:
 4. **Prioritization**: Are high-importance items properly highlighted?
 5. **Fact checking**: Check dates, competitions, scores, people, country relations, and whether trend keywords were incorrectly rewritten as verified events. A trend proves search interest, not that an event happened.
 6. **World news attribution**: Are publisher country and covered countries separated? Should duplicate reports about the same conflict, statement, or action be merged?
-7. **Improvements**: Specific suggestions for improvement.
+7. **Publication blockers**: Set passed=false only for unsupported serious factual claims, fabrication, missing summaries, untranslated content, or an unusable section.
+8. **Non-blocking issues**: Duplicate events, tentative trend wording, a weakly related item, or imperfect source balance belong in suggestions and must not set passed=false.
 
 Set passed=false only for publication-blocking issues such as missing summaries,
-single-source sections, untranslated display content, or unsupported claims.
+untranslated display content, or unsupported claims. Duplicate events and minor
+scope/style issues are suggestions, not blockers.
 Minor stylistic suggestions must keep passed=true.
 
 Output STRICTLY JSON:
@@ -1128,10 +1177,12 @@ export async function aiReview(
     } catch {
       parsed = JSON.parse(jsonrepair(cleaned));
     }
+    const issues = parsed.issues ?? [];
+    const hasBlockingIssue = issues.some((issue) => /编造|捏造|幻觉|不实|无依据|事实错误|事实性错误|严重错误|缺少摘要|无摘要|未翻译|unsupported|fabricat|hallucin|false claim/i.test(issue));
     return {
-      passed: parsed.passed ?? true,
+      passed: parsed.passed === false ? hasBlockingIssue : true,
       summary: parsed.summary ?? "",
-      issues: parsed.issues ?? [],
+      issues,
       suggestions: parsed.suggestions ?? [],
     };
   } catch (e) {

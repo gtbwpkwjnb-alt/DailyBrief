@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
+import { hasUnsupportedHighRiskClaim } from "../lib/ai/enrich";
 import { selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { safeExternalUrl } from "../lib/output/render";
@@ -120,4 +121,27 @@ test("digest candidates prioritize explicit interest matches within a source", (
   ], 1);
 
   assert.equal(selected[0]?.url, "https://example.com/interest");
+});
+
+test("high-risk enrichment claims require evidence in the source excerpt", () => {
+  const item = {
+    url: "https://example.com/news",
+    title: "Senator Lindsey Graham comments on the proposal",
+    excerpt: "The senator discussed the proposal in an interview.",
+  };
+  const fabricated = {
+    summary: "林赛·格雷厄姆病逝，相关提案引发关注。",
+    tags: [],
+    importance: 5,
+    coverageCountries: [],
+    interestMatches: [],
+  };
+  const supported = {
+    ...fabricated,
+    summary: "报道称林赛·格雷厄姆在采访中讨论了这项提案。",
+  };
+
+  assert.equal(hasUnsupportedHighRiskClaim(item, fabricated), "死亡/遇害");
+  assert.equal(hasUnsupportedHighRiskClaim({ ...item, excerpt: "The senator died after a long illness." }, fabricated), null);
+  assert.equal(hasUnsupportedHighRiskClaim(item, supported), null);
 });
