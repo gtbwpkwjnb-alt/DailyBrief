@@ -5,6 +5,7 @@ import { parseReportSidecar } from "../lib/output/sidecar";
 import { safeExternalUrl } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
 import { parseFreshRssItems, parseMinifluxEntries } from "../lib/sources/reader";
+import { detectCoverageCountries, normalizeCustomKeywords } from "../lib/editorial/context";
 
 test("safeExternalUrl only permits HTTP(S) links", () => {
   assert.equal(safeExternalUrl("https://example.com/news"), "https://example.com/news");
@@ -27,6 +28,8 @@ test("source registry rejects unsafe URLs and duplicate IDs", () => {
   assert.equal(sourceRegistrySchema.safeParse([source, source]).success, false);
   assert.equal(sourceRegistrySchema.safeParse([{ ...source, type: "reader" }]).success, false);
   assert.equal(sourceRegistrySchema.safeParse([{ ...source, type: "reader", provider: "freshrss" }]).success, true);
+  assert.equal(sourceRegistrySchema.safeParse([{ ...source, category: "politics" }]).success, false);
+  assert.equal(sourceRegistrySchema.safeParse([{ ...source, category: "politics", originCountry: "美国" }]).success, true);
 });
 
 test("reader providers normalize their documented response shapes", () => {
@@ -58,6 +61,8 @@ test("consolidated result ignores unrequested URLs and applies defaults", () => 
     summary: "summary",
     tags: [],
     importance: 5,
+    coverageCountries: [],
+    interestMatches: [],
   });
   assert.equal(result.has("https://example.com/other"), false);
 });
@@ -83,4 +88,10 @@ test("report sidecar validates data and restores publication timestamps", () => 
   });
   assert.ok(sidecar.articles[0].publishedAt instanceof Date);
   assert.throws(() => parseReportSidecar({ date: "invalid", articles: [] }));
+});
+
+test("editorial context separates publisher country from covered countries", () => {
+  assert.deepEqual(detectCoverageCountries("US and Iran discuss a new regional agreement"), ["美国", "伊朗"]);
+  assert.deepEqual(normalizeCustomKeywords(" AI Agent,伊朗,AI Agent,这是一个很长的关键词超过限制 "), ["AI Agent", "伊朗", "这是一个很长的关键词超过限制"]);
+  assert.equal(normalizeCustomKeywords("a,b,c,d,e,f,g,h,i").length, 8);
 });

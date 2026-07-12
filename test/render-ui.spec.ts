@@ -39,3 +39,32 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   expect(pageErrors).toEqual([]);
   expect((await page.screenshot()).byteLength).toBeGreaterThan(1_000);
 });
+
+test("world cards show publisher attribution and the incremental filter control", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const article: ArticleInput = {
+    sourceId: "bbc-world",
+    source: "BBC World",
+    sourceCountry: "英国",
+    title: "US and Iran discuss a new regional agreement",
+    displayTitle: "美国与伊朗讨论新的地区协议",
+    url: "https://example.com/world",
+    category: "politics",
+    excerpt: "The United States and Iran discussed a regional agreement.",
+    summary: "美国与伊朗就新的地区协议展开讨论，后续仍需等待正式文件确认。",
+    coverageCountries: ["美国", "伊朗"],
+    importance: 7,
+    tags: ["国际", "外交"],
+  };
+  const html = renderHtml(report, groupRaw([article], sources), "2026-07-10", []);
+
+  await page.setContent(html);
+  await expect(page.locator(".article-attribution")).toContainText("英国媒体");
+  await expect(page.locator(".article-attribution")).toContainText("美国");
+  await expect(page.locator(".article-attribution")).toContainText("伊朗");
+  await page.locator("#customFilterToggle").click();
+  await expect(page.locator("#customFilterForm")).toBeVisible();
+  await expect(page.locator("#customKeywordsInput")).toHaveAttribute("maxlength", "120");
+  expect(pageErrors).toEqual([]);
+});

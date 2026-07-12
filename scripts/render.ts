@@ -18,7 +18,7 @@ function loadReport(date: string): DailyReport {
   return JSON.parse(fs.readFileSync(file, "utf8")) as DailyReport;
 }
 
-function loadArticles(date: string): { articles: ArticleInput[]; failedSources?: Array<{ id: string; name: string; reason: string }> } {
+function loadArticles(date: string): { articles: ArticleInput[]; failedSources?: Array<{ id: string; name: string; reason: string }>; runStats?: import("../lib/output/render").RunStats; filterProfile?: import("../lib/output/render").FilterProfile } {
   const file = path.join(OUTPUT_DIR, date, `${date}-articles.json`);
   if (!fs.existsSync(file)) {
     throw new Error(
@@ -30,6 +30,8 @@ function loadArticles(date: string): { articles: ArticleInput[]; failedSources?:
   return {
     articles: data.articles,
     failedSources: data.failedSources,
+    runStats: data.runStats,
+    filterProfile: data.filterProfile,
   };
 }
 
@@ -38,7 +40,7 @@ async function main() {
   console.log(`[render] re-rendering ${date} from cached data…`);
 
   const report = loadReport(date);
-  const { articles, failedSources } = loadArticles(date);
+  const { articles, failedSources, runStats, filterProfile } = loadArticles(date);
   console.log(`[render] loaded ${articles.length} articles + report`);
 
   // Dynamic import to bypass ESM module cache during UI iteration
@@ -46,11 +48,11 @@ async function main() {
     `../lib/output/render?cacheBust=${Date.now()}`
   );
 
-  const raw = groupRaw(articles, sources);
+  const raw = groupRaw(articles, sources, { customKeywords: filterProfile?.customKeywords });
   const dateDir = path.join(OUTPUT_DIR, date);
   fs.mkdirSync(dateDir, { recursive: true });
   const base = path.join(dateDir, date);
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, {}, undefined), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, {}, undefined, runStats, filterProfile), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[render] wrote ${base}.{html,md}`);

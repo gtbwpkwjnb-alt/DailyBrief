@@ -6,6 +6,8 @@ export type SourceTier = "core" | "standard" | "supplement";
 export interface SourceDef {
   id: string;
   name: string;
+  /** Country/region where the publisher is based, separate from story geography. */
+  originCountry?: string;
   type: SourceType;
   /**
    * Collection boundary. Omitted sources use the existing direct fetch path.
@@ -88,6 +90,12 @@ export interface RawArticle {
   displayTitle?: string;
   /** LLM-assigned editorial importance score, from 1 (low) to 10 (highest). */
   importance?: number;
+  /** Publisher country, copied from the source registry for display and audit. */
+  sourceCountry?: string;
+  /** Countries explicitly mentioned or identified in the article content. */
+  coverageCountries?: string[];
+  /** User-supplied incremental interest terms matched by the article. */
+  interestMatches?: string[];
   /**
    * Structured one-line metadata to display above the excerpt — currently
    * used by GitHub Trending for "Language · ★stars · forks · stars today".

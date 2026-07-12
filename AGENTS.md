@@ -66,12 +66,12 @@ sources.config.json   # SINGLE SOURCE OF TRUTH for the source registry
 
 `[date]` defaults to today in `REPORT_TZ`. Output is `daily_reports/<date>/<date>.html` + `<date>.json` + `<date>-articles.json` + `source-health.json` (note the hyphen in the articles cache filename); add `<date>.md` if `OUTPUT_MARKDOWN=true`.
 
-Fetch defaults are 6 concurrent sources with up to 3 exponential-backoff attempts. `SOURCE_MIN_SUCCESS_RATE` (default `0.6`) and `MIN_ENRICHMENT_COVERAGE` (default `1.0` for visible articles) block publication when quality is below threshold.
+Fetch defaults are 6 concurrent sources with up to 3 exponential-backoff attempts. `SOURCE_MIN_SUCCESS_RATE` (default `0.6`) and `MIN_ENRICHMENT_COVERAGE` (default `1.0` for visible articles) block publication when quality is below threshold. Runs reuse a completed same-day sidecar for 5 hours when requested, then refetch after the window expires.
 Every run writes `logs/daily-<date>.log` and `source-health.json` before the source-quality gate. Set standard `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` variables when the local network requires an outbound proxy.
 
 ## Adding a source
 
-1. Edit `sources.config.json` — append an entry. Fields: `id` (unique), `name`, `type` (`rss`/`api`/`scrape`/`reader`), `url`, `category` (`tech`/`finance`/`politics`), optional `provider`, `providerSourceId`, `tier`, `subcategory`, `enabled`, `useCurl`, `lang`, `locales`, `notes`. `reader` requires `provider=freshrss|miniflux`.
+1. Edit `sources.config.json` — append an entry. Fields: `id` (unique), `name`, `type` (`rss`/`api`/`scrape`/`reader`), `url`, `category` (`tech`/`finance`/`politics`), optional `provider`, `providerSourceId`, `tier`, `subcategory`, `enabled`, `useCurl`, `lang`, `locales`, `notes`, `originCountry`. `politics` sources require `originCountry` so publisher geography is not confused with story geography. `reader` requires `provider=freshrss|miniflux`.
 2. For non-RSS types: add a fetcher in `lib/sources/<id>.ts` exporting `fetchXxx(sourceId)` returning `RawArticle[]`, then add a branch in `lib/sources/dispatch.ts`.
 3. Run `npm run sources:check` to validate the JSON, then `npm run dry-run` to verify the fetch.
 
