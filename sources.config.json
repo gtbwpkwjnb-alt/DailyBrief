@@ -578,6 +578,7 @@
   {
     "id": "bbc-world",
     "name": "BBC World",
+    "originCountry": "英国",
     "type": "rss",
     "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
     "useCurl": true,
@@ -593,6 +594,7 @@
   {
     "id": "guardian-world",
     "name": "The Guardian",
+    "originCountry": "英国",
     "type": "rss",
     "url": "https://www.theguardian.com/world/rss",
     "useCurl": true,
@@ -608,6 +610,7 @@
   {
     "id": "nyt-world",
     "name": "NYT World",
+    "originCountry": "美国",
     "type": "rss",
     "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
     "category": "politics",
@@ -622,6 +625,7 @@
   {
     "id": "npr-world",
     "name": "NPR World",
+    "originCountry": "美国",
     "type": "rss",
     "url": "https://feeds.npr.org/1004/rss.xml",
     "category": "politics",
@@ -636,6 +640,7 @@
   {
     "id": "dw-chinese",
     "name": "DW 中文",
+    "originCountry": "德国",
     "type": "rss",
     "url": "https://rss.dw.com/rdf/rss-chi-all",
     "category": "politics",
@@ -649,6 +654,7 @@
   {
     "id": "aljazeera",
     "name": "Al Jazeera",
+    "originCountry": "卡塔尔",
     "type": "rss",
     "url": "https://www.aljazeera.com/xml/rss/all.xml",
     "category": "politics",
@@ -663,6 +669,7 @@
   {
     "id": "the-diplomat",
     "name": "The Diplomat",
+    "originCountry": "美国",
     "type": "rss",
     "url": "https://thediplomat.com/feed/",
     "category": "politics",
@@ -677,6 +684,7 @@
   {
     "id": "peoples-daily",
     "name": "人民网时政",
+    "originCountry": "中国",
     "type": "rss",
     "url": "http://www.people.com.cn/rss/politics.xml",
     "category": "politics",
@@ -689,6 +697,7 @@
   {
     "id": "people-world",
     "name": "人民网国际",
+    "originCountry": "中国",
     "type": "rss",
     "url": "http://www.people.com.cn/rss/world.xml",
     "category": "politics",
@@ -702,6 +711,7 @@
   {
     "id": "xinhua-politics",
     "name": "新华网时政",
+    "originCountry": "中国",
     "type": "rss",
     "url": "http://www.xinhuanet.com/politics/news_politics.xml",
     "category": "politics",
@@ -715,6 +725,7 @@
   {
     "id": "rfa-chinese",
     "name": "RFA 中文",
+    "originCountry": "美国",
     "type": "rss",
     "url": "https://www.rfa.org/mandarin/RSS",
     "category": "politics",
@@ -727,6 +738,7 @@
   {
     "id": "france24",
     "name": "France 24",
+    "originCountry": "法国",
     "type": "rss",
     "url": "https://www.france24.com/en/rss",
     "category": "politics",
@@ -741,6 +753,7 @@
   {
     "id": "nhk-world",
     "name": "NHK World",
+    "originCountry": "日本",
     "type": "rss",
     "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
     "category": "politics",
@@ -755,6 +768,7 @@
   {
     "id": "scmp-china",
     "name": "SCMP China",
+    "originCountry": "中国香港",
     "type": "rss",
     "url": "https://www.scmp.com/rss/4/feed",
     "category": "politics",
@@ -769,6 +783,7 @@
   {
     "id": "hindu-international",
     "name": "The Hindu",
+    "originCountry": "印度",
     "type": "rss",
     "url": "https://www.thehindu.com/news/international/feeder/default.rss",
     "category": "politics",
@@ -783,6 +798,7 @@
   {
     "id": "washingtonpost-world",
     "name": "Washington Post",
+    "originCountry": "美国",
     "type": "rss",
     "url": "https://feeds.washingtonpost.com/rss/world",
     "category": "politics",
@@ -797,6 +813,7 @@
   {
     "id": "nikkei-asia",
     "name": "Nikkei Asia",
+    "originCountry": "日本",
     "type": "rss",
     "url": "https://asia.nikkei.com/rss/feed",
     "category": "politics",
@@ -812,6 +829,7 @@
   {
     "id": "ap-world",
     "name": "AP News",
+    "originCountry": "美国",
     "type": "rss",
     "url": "https://feeds.ap.org/ap/world.rss",
     "category": "politics",
@@ -826,6 +844,7 @@
   {
     "id": "japantimes",
     "name": "Japan Times",
+    "originCountry": "日本",
     "type": "rss",
     "url": "https://www.japantimes.co.jp/feed/",
     "category": "politics",
@@ -840,6 +859,7 @@
   {
     "id": "straitstimes-asia",
     "name": "Straits Times",
+    "originCountry": "新加坡",
     "type": "rss",
     "url": "https://www.straitstimes.com/news/asia/rss.xml",
     "category": "politics",
@@ -854,6 +874,7 @@
   {
     "id": "toi-world",
     "name": "Times of India",
+    "originCountry": "印度",
     "type": "rss",
     "url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
     "category": "politics",
@@ -868,6 +889,7 @@
   {
     "id": "bbc-chinese",
     "name": "BBC 中文",
+    "originCountry": "英国",
     "type": "rss",
     "url": "https://www.bbc.com/zhongwen/simp/index.xml",
     "category": "politics",
@@ -882,6 +904,7 @@
   {
     "id": "china-daily-world",
     "name": "中国日报国际",
+    "originCountry": "中国",
     "type": "rss",
     "url": "https://www.chinadaily.com.cn/rss/world.xml",
     "category": "politics",
@@ -1144,6 +1167,7 @@
   {
     "id": "freshrss-politics",
     "name": "FreshRSS · 国际",
+    "originCountry": "聚合源",
     "type": "reader",
     "provider": "freshrss",
     "providerSourceId": "user/-/label/world",

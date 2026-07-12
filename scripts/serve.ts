@@ -3,6 +3,8 @@
  *
  * Provides:
  *   - Static file serving from daily_reports/
+ *   - POST /api/run — start a local run with optional incremental keywords
+ *   - GET /api/run/status — live local run state and recent logs
  *   - POST /api/refetch/:sourceId — single-source manual refetch
  *
  * Usage: npm run serve
@@ -21,8 +23,10 @@ import { loadAllSources } from "../lib/sources/registry";
 import { fetchSource } from "../lib/sources/dispatch";
 import { renderHtml } from "../lib/output/render";
 import { groupRaw } from "../lib/output/render";
+import type { FilterProfile, RunStats } from "../lib/output/render";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import type { DailyReport, ArticleInput } from "../lib/ai/pipeline";
+import { normalizeCustomKeywords } from "../lib/editorial/context";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -38,6 +42,8 @@ type RunState = {
   finishedAt?: string;
   exitCode?: number;
   logs: string[];
+  stats?: RunStats;
+  filterProfile?: FilterProfile;
 };
 
 let runState: RunState = { status: "idle", stage: "等待运行", progress: 0, logs: [] };
@@ -71,7 +77,7 @@ function appendRunOutput(chunk: string): void {
   }
 }
 
-function startDailyRun(): void {
+function startDailyRun(customKeywords: string[]): void {
   runState = {
     status: "running",
     stage: "启动任务",
@@ -83,6 +89,7 @@ function startDailyRun(): void {
   const child = spawn(npmCommand, ["run", "daily"], {
     cwd: PROJECT_ROOT,
     windowsHide: true,
+    env: { ...process.env, DAILY_CUSTOM_KEYWORDS_JSON: JSON.stringify(customKeywords) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (chunk) => appendRunOutput(chunk.toString("utf8")));
@@ -93,6 +100,7 @@ function startDailyRun(): void {
   });
   child.on("close", (code) => {
     const success = code === 0;
+    const latest = success ? loadLatest() : null;
     runState = {
       ...runState,
       status: success ? "success" : "error",
@@ -100,8 +108,23 @@ function startDailyRun(): void {
       progress: success ? 100 : runState.progress,
       exitCode: code ?? undefined,
       finishedAt: new Date().toISOString(),
+      stats: latest?.runStats,
+      filterProfile: latest?.filterProfile,
     };
   });
+}
+
+async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 16_384) throw new Error("request body too large");
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 function isTrustedMutation(req: http.IncomingMessage): boolean {
@@ -137,7 +160,7 @@ function latestDateDir(): string | null {
 /**
  * Load the latest report + articles sidecar.
  */
-function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: string; failedSources?: Array<{ id: string; name: string; reason: string }> } | null {
+function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: string; failedSources?: Array<{ id: string; name: string; reason: string }>; runStats?: RunStats; filterProfile?: FilterProfile } | null {
   const dateDir = latestDateDir();
   if (!dateDir) return null;
   const base = path.join(REPORTS_DIR, dateDir, dateDir);
@@ -146,7 +169,7 @@ function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: st
   if (!fs.existsSync(reportJson) || !fs.existsSync(articlesJson)) return null;
   const report = JSON.parse(fs.readFileSync(reportJson, "utf8")) as DailyReport;
   const sidecar = parseReportSidecar(JSON.parse(fs.readFileSync(articlesJson, "utf8")));
-  return { report, articles: sidecar.articles, date: dateDir, failedSources: sidecar.failedSources };
+  return { report, articles: sidecar.articles, date: dateDir, failedSources: sidecar.failedSources, runStats: sidecar.runStats, filterProfile: sidecar.filterProfile };
 }
 
 /**
@@ -185,7 +208,16 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(runState));
       return;
     }
-    startDailyRun();
+    let body: { keywords?: unknown } = {};
+    try {
+      body = await readJsonBody(req) as { keywords?: unknown };
+    } catch (error) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : "invalid request" }));
+      return;
+    }
+    const keywords = normalizeCustomKeywords(Array.isArray(body.keywords) ? body.keywords.map(String) : typeof body.keywords === "string" ? body.keywords : undefined);
+    startDailyRun(keywords);
     res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(runState));
     return;
@@ -218,14 +250,14 @@ const server = http.createServer(async (req, res) => {
         if (newItems.length > 0) {
           latest.articles.push(...newItems.map((it) => ({ ...it, source: source.name })));
           // Re-render HTML with updated data
-          const raw = groupRaw(latest.articles, allSources);
+          const raw = groupRaw(latest.articles, allSources, { customKeywords: latest.filterProfile?.customKeywords });
           const dateDir = latest.date;
           const base = path.join(REPORTS_DIR, dateDir, dateDir);
           // Remove failed source from list if it succeeded
           latest.failedSources = (latest.failedSources ?? []).filter((f) => f.id !== sourceId);
-          const html = renderHtml(latest.report, raw, latest.date, latest.failedSources);
+          const html = renderHtml(latest.report, raw, latest.date, latest.failedSources, undefined, undefined, latest.runStats, latest.filterProfile);
           fs.writeFileSync(`${base}.html`, html, "utf8");
-          fs.writeFileSync(`${base}-articles.json`, JSON.stringify({ date: latest.date, articles: latest.articles, failedSources: latest.failedSources }, null, 2), "utf8");
+          fs.writeFileSync(`${base}-articles.json`, JSON.stringify({ date: latest.date, articles: latest.articles, failedSources: latest.failedSources, runStats: latest.runStats, filterProfile: latest.filterProfile }, null, 2), "utf8");
           console.log(`[serve] merged ${newItems.length} new items, re-rendered HTML`);
         }
         if (items.length > 0) {

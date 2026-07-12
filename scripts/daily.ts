@@ -31,6 +31,15 @@ import {
   renderHtml,
   renderMarkdown,
 } from "../lib/output/render";
+import { parseReportSidecar } from "../lib/output/sidecar";
+import type { FilterProfile, RunStats } from "../lib/output/render";
+import {
+  BASE_FILTER_RULES_EN,
+  BASE_FILTER_RULES_ZH,
+  detectCoverageCountries,
+  matchCustomKeywords,
+  normalizeCustomKeywords,
+} from "../lib/editorial/context";
 import { analyzeWatchlist } from "../lib/trading/runner";
 import { fetchCryptoFearGreed } from "../lib/trading/fear-greed";
 import { fetchCryptoGlobal } from "../lib/trading/coingecko";
@@ -69,6 +78,44 @@ type NetworkProbe = { url: string; ok: boolean; reason?: string };
 function appendRunLog(date: string, message: string): void {
   fs.mkdirSync(LOG_DIR, { recursive: true });
   fs.appendFileSync(path.join(LOG_DIR, `daily-${date}.log`), `[${new Date().toISOString()}] ${message}\n`, "utf8");
+}
+
+const REUSE_WINDOW_MS = 5 * 60 * 60 * 1000;
+
+function requestedCustomKeywords(): string[] {
+  const raw = process.env.DAILY_CUSTOM_KEYWORDS_JSON;
+  if (!raw) return normalizeCustomKeywords(process.env.DAILY_CUSTOM_KEYWORDS);
+  try {
+    return normalizeCustomKeywords(JSON.parse(raw) as string[]);
+  } catch {
+    return normalizeCustomKeywords(raw);
+  }
+}
+
+function loadRecentRun(date: string): ReturnType<typeof parseReportSidecar> | null {
+  const sidecarPath = path.join(OUTPUT_DIR, date, `${date}-articles.json`);
+  if (!fs.existsSync(sidecarPath)) return null;
+  try {
+    const parsed = parseReportSidecar(JSON.parse(fs.readFileSync(sidecarPath, "utf8")));
+    const generatedAt = parsed.runStats?.generatedAt;
+    if (!generatedAt) return null;
+    const age = Date.now() - Date.parse(generatedAt);
+    if (!Number.isFinite(age) || age < 0 || age >= REUSE_WINDOW_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function hydrateArticleContext(articles: ArticleInput[], customKeywords: string[]): void {
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+  for (const article of articles) {
+    const source = sourceById.get(article.sourceId);
+    article.sourceCountry ??= source?.originCountry;
+    const detected = detectCoverageCountries(`${article.title} ${article.excerpt ?? ""} ${article.summary ?? ""}`);
+    article.coverageCountries = detected.slice(0, 8);
+    article.interestMatches = matchCustomKeywords(article, customKeywords);
+  }
 }
 
 function writeSourceHealth(
@@ -284,7 +331,12 @@ async function fetchAll(): Promise<{ articles: ArticleInput[]; failedSources: Fa
       health.push(res.health);
       if (res.health.success && res.items) {
         console.log(`  ${res.source.id.padEnd(20)} ${res.items.length} (${res.health.attempts} attempt${res.health.attempts === 1 ? "" : "s"})`);
-        articles.push(...res.items.map((it) => ({ ...it, source: res.source.name })));
+        articles.push(...res.items.map((it) => ({
+          ...it,
+          source: res.source.name,
+          sourceCountry: res.source.originCountry,
+          coverageCountries: detectCoverageCountries(`${it.title} ${it.excerpt ?? ""}`),
+        })));
       } else {
         const reason = res.health.reason ?? "unknown fetch error";
         console.error(`  ${res.source.id.padEnd(20)} FAILED after ${res.health.attempts} attempts — ${reason}`);
@@ -688,27 +740,63 @@ async function main() {
   const date = todayKey();
   const dateDir = path.join(OUTPUT_DIR, date);
   const proxy = proxyLabel();
-  appendRunLog(date, `started${proxy ? ` with proxy ${proxy}` : " without proxy"}`);
-  const network = await probeHttpEndpoints();
-  const availableProbes = network.filter((probe) => probe.ok).length;
-  console.log(`[daily] network preflight: ${availableProbes}/${network.length} endpoints reachable${proxy ? ` via ${proxy}` : ""}`);
-  appendRunLog(date, `network preflight ${availableProbes}/${network.length}: ${JSON.stringify(network)}`);
+  const customKeywords = requestedCustomKeywords();
+  const cachedRun = loadRecentRun(date);
+  const filterProfile: FilterProfile = {
+    baseRules: REPORT_LOCALE === "en" ? BASE_FILTER_RULES_EN : BASE_FILTER_RULES_ZH,
+    customKeywords,
+    mode: customKeywords.length > 0 ? "incremental" : "base",
+  };
+  let articles: ArticleInput[];
+  let failedSources: FailedSource[];
+  let health: SourceHealth[];
+  let sourceSuccessRate: number;
+  let fetchedArticleCount: number;
+  let fetchedSources: number;
+  let successfulSources: number;
 
-  // Phase 1+2+3: Fetch all sources (with priority-based ordering),
-  // then globally dedup by URL + title
-  console.log(`[daily] ${date} — fetching sources (priority order)…\n`);
-  const { articles, failedSources, health } = await fetchAll();
-  const sourceSuccessRate = health.filter((source) => source.success).length / health.length;
+  appendRunLog(date, `started${proxy ? ` with proxy ${proxy}` : " without proxy"}`);
+  if (cachedRun) {
+    articles = cachedRun.articles;
+    failedSources = cachedRun.failedSources;
+    health = [];
+    fetchedArticleCount = cachedRun.runStats?.fetchedArticles ?? articles.length;
+    fetchedSources = cachedRun.runStats?.fetchedSources ?? sources.filter((source) => source.enabled !== false).length;
+    successfulSources = cachedRun.runStats?.successfulSources ?? fetchedSources;
+    sourceSuccessRate = cachedRun.runStats?.sourceSuccessRate ?? 1;
+    console.log(`[daily] reusing ${date} cache from the last 5 hours; skipping source fetch`);
+    appendRunLog(date, `reusing cached deduped articles; custom keywords=${JSON.stringify(customKeywords)}`);
+  } else {
+    const network = await probeHttpEndpoints();
+    const availableProbes = network.filter((probe) => probe.ok).length;
+    console.log(`[daily] network preflight: ${availableProbes}/${network.length} endpoints reachable${proxy ? ` via ${proxy}` : ""}`);
+    appendRunLog(date, `network preflight ${availableProbes}/${network.length}: ${JSON.stringify(network)}`);
+
+    // Phase 1+2+3: Fetch all sources (with priority-based ordering),
+    // then globally dedup by URL + title.
+    console.log(`[daily] ${date} — fetching sources (priority order)…\n`);
+    const fetched = await fetchAll();
+    articles = fetched.articles;
+    failedSources = fetched.failedSources;
+    health = fetched.health;
+    fetchedArticleCount = articles.length;
+    fetchedSources = health.length;
+    successfulSources = health.filter((source) => source.success).length;
+    sourceSuccessRate = successfulSources / Math.max(1, fetchedSources);
+    writeSourceHealth(dateDir, date, sourceSuccessRate, health, network);
+  }
+
   const minSourceSuccessRate = readFraction("SOURCE_MIN_SUCCESS_RATE", 0.6);
-  writeSourceHealth(dateDir, date, sourceSuccessRate, health, network);
-  appendRunLog(date, `source health ${(sourceSuccessRate * 100).toFixed(1)}% (${health.filter((source) => source.success).length}/${health.length})`);
-  console.log(`[daily] source health: ${(sourceSuccessRate * 100).toFixed(1)}% success (${health.filter((source) => source.success).length}/${health.length})`);
+  appendRunLog(date, `source health ${(sourceSuccessRate * 100).toFixed(1)}% (${successfulSources}/${fetchedSources})`);
+  console.log(`[daily] source health: ${(sourceSuccessRate * 100).toFixed(1)}% success (${successfulSources}/${fetchedSources})`);
   if (sourceSuccessRate < minSourceSuccessRate) {
     appendRunLog(date, `blocked by SOURCE_MIN_SUCCESS_RATE ${(minSourceSuccessRate * 100).toFixed(1)}%`);
     throw new Error(`source success rate ${(sourceSuccessRate * 100).toFixed(1)}% is below SOURCE_MIN_SUCCESS_RATE ${(minSourceSuccessRate * 100).toFixed(1)}%`);
   }
   console.log(`\n[daily] total articles: ${articles.length}, failed sources: ${failedSources.length}`);
   if (articles.length === 0) throw new Error("no articles fetched — aborting");
+
+  hydrateArticleContext(articles, customKeywords);
 
   // Global dedup: URL exact match + title normalized match
   {
@@ -744,7 +832,7 @@ async function main() {
   ];
   // Enrich the exact articles that groupRaw will render. This avoids spending
   // the budget on fetch-order items while visible cards remain untranslated.
-  const visibleRaw = groupRaw(articles, sources);
+  const visibleRaw = groupRaw(articles, sources, { customKeywords });
   const visibleByCategory = new Map<string, ArticleInput[]>();
   for (const category of Object.keys(visibleRaw) as Array<keyof typeof visibleRaw>) {
     const seen = new Set<string>();
@@ -758,13 +846,39 @@ async function main() {
       });
     visibleByCategory.set(category, visible);
   }
-  const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
+
+  const dedupedArticleCount = articles.length;
+  const runStats: RunStats = {
+    fetchedSources,
+    successfulSources,
+    sourceSuccessRate,
+    fetchedArticles: fetchedArticleCount,
+    dedupedArticles: dedupedArticleCount,
+    generatedAt: new Date().toISOString(),
+    mode: cachedRun ? "reuse" : "fresh",
+  };
+  const enrichmentHealth = cachedRun && customKeywords.length === 0
+    ? CATEGORY_CONFIG.map((cfg) => {
+        const items = visibleByCategory.get(cfg.key) ?? [];
+        const enriched = items.filter((article) => article.displayTitle && article.summary).length;
+        console.log(`[daily]  ${cfg.key.padEnd(12)} cache reuse ${enriched}/${items.length}`);
+        return { key: cfg.key, requested: items.length, enriched };
+      })
+    : await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
     const items = visibleByCategory.get(cfg.key) ?? [];
     if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
     const t1 = Date.now();
     const results = await consolidatedEnrich(
       cfg.label,
-      items.map((a) => ({ url: a.url, title: a.title, excerpt: a.summary ?? a.excerpt, source: a.source })),
+      items.map((a) => ({
+        url: a.url,
+        title: a.title,
+        excerpt: a.summary ?? a.excerpt,
+        source: a.source,
+        sourceCountry: a.sourceCountry,
+        customKeywords,
+      })),
+      { customKeywords },
     );
     let matched = 0;
     for (const a of items) {
@@ -774,6 +888,10 @@ async function main() {
         a.summary = r.summary;
         a.tags = r.tags;
         a.importance = r.importance;
+        const explicitCountries = detectCoverageCountries(`${a.title} ${a.excerpt ?? ""} ${a.summary ?? ""}`);
+        const aiCountries = (r.coverageCountries ?? []).filter((country) => explicitCountries.includes(country));
+        a.coverageCountries = [...new Set([...explicitCountries, ...aiCountries])].slice(0, 8);
+        a.interestMatches = [...new Set([...(a.interestMatches ?? []), ...(r.interestMatches ?? [])])].filter((keyword) => customKeywords.includes(keyword));
         matched++;
       }
     }
@@ -807,7 +925,7 @@ async function main() {
   console.log(`[daily] digest ready in ${((Date.now() - digestT0) / 1000).toFixed(1)}s`);
 
   const base = path.join(dateDir, date);
-  const raw = groupRaw(articles, sources);
+  const raw = groupRaw(articles, sources, { customKeywords });
 
   // Phase 7: Deterministic category summaries from already-enriched visible
   // items. This avoids five additional LLM calls and keeps the overview tied
@@ -841,7 +959,7 @@ async function main() {
   const reviewT0 = Date.now();
   const reviewInput = CATEGORY_CONFIG.map((cfg) => {
     const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
-    const lines = items.map((a) => `  - [${a.source}] [重要度 ${a.importance ?? 0}/10] ${a.displayTitle ?? a.title}：${a.summary}`);
+    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；摘要：${a.summary}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);
@@ -855,13 +973,14 @@ async function main() {
   }
 
   // Write output files
+  runStats.generatedAt = new Date().toISOString();
   fs.writeFileSync(`${base}.json`, JSON.stringify(report, null, 2), "utf8");
   fs.writeFileSync(
     `${base}-articles.json`,
-    JSON.stringify({ date, articles, failedSources }, null, 2),
+    JSON.stringify({ date, articles, failedSources, runStats, filterProfile }, null, 2),
     "utf8",
   );
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review, runStats, filterProfile), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[daily] wrote ${base}.{json,html,md,articles.json}`);

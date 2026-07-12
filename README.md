@@ -258,7 +258,7 @@ node scripts/install.mjs --global
 
 运行结果会在当日目录写入 `source-health.json`，包含来源、Provider、栏目成功率与非空产出率。默认低于 60% 来源成功率，或最终可见条目的本地化标题/摘要覆盖不足 100% 时不发布；可通过 `.env.local` 的 `SOURCE_*` 与 `MIN_ENRICHMENT_COVERAGE` 配置。
 
-本地执行 `npm run serve` 后，报告页的运行按钮可直接启动日报，并实时显示网络预检、来源抓取、翻译精炼、质量审核和写入进度。GitHub Pages 上的同一按钮跳转到仓库 Actions，页面通过公开 API 展示最近一次远端运行状态，不会在浏览器保存 GitHub Token。
+本地执行 `npm run serve` 后，报告页的运行按钮可直接启动日报，并实时显示网络预检、来源抓取、翻译精炼、质量审核和写入进度。页面会显示本次抓取来源数、原始/去重信息数、来源成功率、AI 筛选规则和增量关键词。最近一次运行距当前不足 5 小时时，按钮会复用已去重缓存，只重做增量筛选；超过 5 小时才重新抓取来源。GitHub Pages 上的按钮不会跳转页面：若未配置安全的 `DAILY_RUN_ENDPOINT`，会直接显示启动失败；远端公开 Actions 状态仍会显示在进度栏中。不要把 GitHub Token 写入 HTML。
 
 若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这两类诊断 artifact 14 天。
 
@@ -829,6 +829,7 @@ Sources live as a JSON array in [`sources.config.json`](sources.config.json) at 
 | `lang` |  | `zh` means the source is already in Chinese — enrich skips it (no need to translate Chinese into Chinese) |
 | `locales` |  | Array listing which `REPORT_LOCALE` the source appears in. Default `["zh", "en"]` |
 | `notes` |  | Free-form (e.g. "removed because feed died"); ignored at runtime |
+| `originCountry` | politics 必填 | Publisher's country; separate from the countries covered by the story |
 
 ### Adding an RSS source
 

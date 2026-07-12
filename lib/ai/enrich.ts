@@ -9,6 +9,8 @@ export interface EnrichInput {
   title: string;
   excerpt?: string;
   source?: string;
+  sourceCountry?: string;
+  customKeywords?: string[];
 }
 
 const GH_SYSTEM_PROMPT_ZH = `你是一名技术编辑，负责为 GitHub Trending 项目写中文介绍。
@@ -785,7 +787,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 - GitHub 项目 → 说明项目做什么、用什么技术、解决什么问题
 - X 推文 → 不照搬标题党 title，以内容为准确认博主的分享点
 - 论文 → 说明解决的问题、方法、关键结果
-- Google 热搜关键词 → 翻译为中文并说明为何热门（即使无说明也至少有"XX热搜词"）
+- Google/微博/百度热搜关键词 → 翻译为中文并说明搜索热度；只能写“热搜词/搜索热度”，不能把关键词改写成已经确认发生的赛事、比分或事件
 - 即使信息不足，也至少有标题的中文翻译，**不允许遗漏任何条目**
 
 **2. 中文展示标题（必需）**
@@ -800,6 +802,13 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 **4. 重要度评分（必需）**
 - 1-10 分，10 为最重要。基于：新闻影响力、时效性、与目标读者的相关性
 
+**5. 国际时政归属（必需）**
+- coverageCountries 只能填写标题或原文明确提到的国家/地区，最多 4 个；没有明确提及时返回空数组
+- sourceCountry 是媒体所属国，不等于 coverageCountries；不要把媒体所属国当成新闻发生国
+
+**6. 用户兴趣增量（必需）**
+- interestMatches 只能从输入 customKeywords 原样选择明确相关的关键词，没有命中则返回空数组
+
 输出严格 JSON 对象，不要 markdown 包裹：
 {
   "items": [
@@ -808,7 +817,9 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
       "displayTitle": "<12-30 字中文标题>",
       "summary": "<50-90 字中文精炼摘要>",
       "tags": ["科技", "AI", "开源模型"],
-      "importance": 7
+      "importance": 7,
+      "coverageCountries": [],
+      "interestMatches": []
     },
     ...
   ]
@@ -829,7 +840,7 @@ Task: for each item, do ALL three:
 - GitHub repos → what it does, tech, problem solved
 - X posts → ignore clickbait title, extract the actual claim
 - Papers → problem, method, key result
-- Google Trends → explain why trending (or just translate)
+- Google Trends / hot-search keywords → explain search interest; never turn a keyword into a verified event, competition result, score, or date
 - **Do NOT skip any item. Every item must have a summary.**
 
 **2. Display title (required)**
@@ -843,6 +854,13 @@ Task: for each item, do ALL three:
 **4. Importance score (required)**
 - 1-10, 10 = most important. Based on: impact, timeliness, relevance
 
+**5. World-news geography (required)**
+- coverageCountries may contain only countries or regions explicitly present in the title or source text, max 4; use [] when unclear
+- sourceCountry is the publisher's country and is not the same as coverageCountries
+
+**6. Incremental user interest (required)**
+- interestMatches may only copy clearly relevant values from the input customKeywords; use [] when none match
+
 Output STRICTLY a JSON object, no markdown:
 {
   "items": [
@@ -851,7 +869,9 @@ Output STRICTLY a JSON object, no markdown:
       "displayTitle": "<8-16 word English title>",
       "summary": "<50-90 word English summary>",
       "tags": ["Technology", "AI", "open-source"],
-      "importance": 7
+      "importance": 7,
+      "coverageCountries": [],
+      "interestMatches": []
     },
     ...
   ]
@@ -861,6 +881,15 @@ Output STRICTLY a JSON object, no markdown:
 
 const CONSOLIDATED_PROMPTS =
   REPORT_LOCALE === "en" ? CONSOLIDATED_SYSTEM_PROMPT_EN : CONSOLIDATED_SYSTEM_PROMPT_ZH;
+
+type ConsolidatedEnrichment = {
+  displayTitle?: string;
+  summary: string;
+  tags: string[];
+  importance: number;
+  coverageCountries: string[];
+  interestMatches: string[];
+};
 
 /**
  * One-pass enrichment for a batch of articles in the same category.
@@ -874,21 +903,22 @@ const CONSOLIDATED_PROMPTS =
 export async function consolidatedEnrich(
   categoryLabel: string,
   items: EnrichInput[],
-): Promise<Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>> {
+  options: { customKeywords?: string[] } = {},
+): Promise<Map<string, ConsolidatedEnrichment>> {
   if (items.length === 0) return new Map();
 
   const batchSize = 15;
   if (items.length > batchSize) {
-    const batched = new Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>();
+    const batched = new Map<string, ConsolidatedEnrichment>();
     for (let i = 0; i < items.length; i += batchSize) {
-      const partial = await consolidatedEnrich(categoryLabel, items.slice(i, i + batchSize));
+      const partial = await consolidatedEnrich(categoryLabel, items.slice(i, i + batchSize), options);
       for (const [url, value] of partial) batched.set(url, value);
     }
     return batched;
   }
 
-  const result = new Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>();
-  const merge = (values: Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>) => {
+  const result = new Map<string, ConsolidatedEnrichment>();
+  const merge = (values: Map<string, ConsolidatedEnrichment>) => {
     for (const [url, value] of values) result.set(url, value);
   };
 
@@ -906,10 +936,12 @@ export async function consolidatedEnrich(
       title: it.title,
       excerpt: (it.excerpt ?? "").slice(0, 250),
       source: it.source ?? "",
+      sourceCountry: it.sourceCountry ?? "",
+      customKeywords: options.customKeywords ?? it.customKeywords ?? [],
       category: categoryLabel,
     }))),
     "",
-    `请输出 {"items": [{"url": "...", "summary": "...", "tags": [...], "importance": N}, ...]}`,
+    `请输出 {"items": [{"url": "...", "displayTitle": "...", "summary": "...", "tags": [...], "importance": N, "coverageCountries": [], "interestMatches": []}, ...]}`,
     `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
   ].join("\n");
 
@@ -937,7 +969,7 @@ export async function consolidatedEnrich(
   });
   for (let i = 0; i < missing.length; i += 10) {
     const batch = missing.slice(i, i + 10);
-    const batchPrompt = buildConsolidatedPrompt(categoryLabel, batch, langHeader);
+    const batchPrompt = buildConsolidatedPrompt(categoryLabel, batch, langHeader, options);
     try {
       merge(await runConsolidatedOnce(batch, CONSOLIDATED_PROMPTS, batchPrompt, `${categoryLabel}-recovery`));
     } catch (e) {
@@ -948,7 +980,7 @@ export async function consolidatedEnrich(
   return result;
 }
 
-function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], langHeader: string): string {
+function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], langHeader: string, options: { customKeywords?: string[] } = {}): string {
   return [
     langHeader,
     "",
@@ -961,10 +993,12 @@ function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], la
       title: it.title,
       excerpt: (it.excerpt ?? "").slice(0, 250),
       source: it.source ?? "",
+      sourceCountry: it.sourceCountry ?? "",
+      customKeywords: options.customKeywords ?? it.customKeywords ?? [],
       category: categoryLabel,
     }))),
     "",
-    `请输出 {"items": [{"url": "...", "summary": "...", "tags": [...], "importance": N}, ...]}`,
+    `请输出 {"items": [{"url": "...", "displayTitle": "...", "summary": "...", "tags": [...], "importance": N, "coverageCountries": [], "interestMatches": []}, ...]}`,
     `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
   ].join("\n");
 }
@@ -974,8 +1008,8 @@ async function runConsolidatedOnce(
   systemPrompt: string,
   userPrompt: string,
   scope: string,
-): Promise<Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>> {
-  const result = new Map<string, { displayTitle?: string; summary: string; tags: string[]; importance: number }>();
+): Promise<Map<string, ConsolidatedEnrichment>> {
+  const result = new Map<string, ConsolidatedEnrichment>();
 
   const { text } = await runLlm({
     systemPrompt,
@@ -1023,7 +1057,9 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
 2. **质量**：摘要是否精炼、信息密度是否足够、是否有明显错误或编造内容？
 3. **多样性**：信息来源是否多样化？是否过度依赖某几个源？
 4. **重点突出**：重要度高的条目是否正确突出了？
-5. **改进建议**：如果有改进空间，给出具体建议。
+5. **事实核验**：特别检查日期、赛事、比分、人物、国家关系和“热搜词”是否被错误改写成已确认事实；热搜只能说明搜索热度，不能证明事件发生。
+6. **国际时政**：媒体所属国与文章涉及国是否区分；同一冲突、声明或行动的重复条目是否应合并。
+7. **改进建议**：如果有改进空间，给出具体建议。
 
 只有缺少摘要、板块来源单一、展示内容未翻译、存在无依据结论等发布级问题才设 passed=false；轻微文风建议必须保持 passed=true。
 
@@ -1044,7 +1080,9 @@ Check:
 2. **Quality**: Are summaries concise and accurate? Any fabricated content?
 3. **Diversity**: Are sources diverse? Over-reliance on a few sources?
 4. **Prioritization**: Are high-importance items properly highlighted?
-5. **Improvements**: Specific suggestions for improvement.
+5. **Fact checking**: Check dates, competitions, scores, people, country relations, and whether trend keywords were incorrectly rewritten as verified events. A trend proves search interest, not that an event happened.
+6. **World news attribution**: Are publisher country and covered countries separated? Should duplicate reports about the same conflict, statement, or action be merged?
+7. **Improvements**: Specific suggestions for improvement.
 
 Set passed=false only for publication-blocking issues such as missing summaries,
 single-source sections, untranslated display content, or unsupported claims.

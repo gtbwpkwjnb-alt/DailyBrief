@@ -3,6 +3,7 @@ import { z } from "zod";
 export const sourceSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
+  originCountry: z.string().trim().min(1).optional(),
   type: z.enum(["rss", "api", "scrape", "reader"]),
   provider: z.enum(["direct", "freshrss", "miniflux"]).optional(),
   providerSourceId: z.string().trim().min(1).optional(),
@@ -33,6 +34,13 @@ export const sourceRegistrySchema = z.array(sourceSchema).superRefine((sources, 
       });
     }
     seen.add(source.id);
+    if (source.category === "politics" && !source.originCountry) {
+      ctx.addIssue({
+        code: "custom",
+        message: "politics sources require originCountry",
+        path: [index, "originCountry"],
+      });
+    }
     if (source.type === "reader" && !["freshrss", "miniflux"].includes(source.provider ?? "")) {
       ctx.addIssue({
         code: "custom",
