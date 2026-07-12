@@ -66,7 +66,7 @@ const MAX_AGE_DAYS = 14;
  * until we hit the limit. Sources with fewer items naturally drop out
  * and others absorb the slack.
  */
-function selectRoundRobin(
+export function selectRoundRobin(
   items: ArticleInput[],
   limit: number,
 ): ArticleInput[] {
@@ -83,8 +83,11 @@ function selectRoundRobin(
   }
   for (const arr of bySource.values()) {
     arr.sort(
-      (a, b) =>
-        (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0),
+      (a, b) => {
+        const interestDelta = (b.interestMatches?.length ?? 0) - (a.interestMatches?.length ?? 0);
+        if (interestDelta !== 0) return interestDelta;
+        return (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0);
+      },
     );
   }
 
