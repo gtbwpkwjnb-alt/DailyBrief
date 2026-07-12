@@ -9,6 +9,7 @@ import { describeHttpError, probeHttpEndpoints, proxyLabel } from "../lib/source
 import {
   generateDailyReport,
   type ArticleInput,
+  type DailyReport,
 } from "../lib/ai/pipeline";
 import { getModelTag, validateBackendCredentials } from "../lib/ai/llm";
 import {
@@ -102,6 +103,15 @@ function loadRecentRun(date: string): ReturnType<typeof parseReportSidecar> | nu
     const age = Date.now() - Date.parse(generatedAt);
     if (!Number.isFinite(age) || age < 0 || age >= REUSE_WINDOW_MS) return null;
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function loadCachedReport(date: string): DailyReport | null {
+  const reportPath = path.join(OUTPUT_DIR, date, `${date}.json`);
+  try {
+    return JSON.parse(fs.readFileSync(reportPath, "utf8")) as DailyReport;
   } catch {
     return null;
   }
@@ -734,14 +744,24 @@ async function runTrading(): Promise<TradingSection | null> {
 }
 
 async function main() {
-  // Phase 0: Validate LLM credentials before wasting time
-  validateBackendCredentials();
-
   const date = todayKey();
   const dateDir = path.join(OUTPUT_DIR, date);
   const proxy = proxyLabel();
   const customKeywords = requestedCustomKeywords();
   const cachedRun = loadRecentRun(date);
+  const completeCachedReport = cachedRun
+    && customKeywords.length === 0
+    && fs.existsSync(path.join(dateDir, `${date}.json`))
+    && fs.existsSync(path.join(dateDir, `${date}.html`));
+  if (completeCachedReport) {
+    appendRunLog(date, "reused complete report within 5-hour window; no LLM calls");
+    console.log(`[daily] reusing complete ${date} report from the last 5 hours; no LLM calls`);
+    return;
+  }
+
+  // Validate credentials only when this run needs an LLM call.
+  validateBackendCredentials();
+
   const filterProfile: FilterProfile = {
     baseRules: REPORT_LOCALE === "en" ? BASE_FILTER_RULES_EN : BASE_FILTER_RULES_ZH,
     customKeywords,
@@ -867,10 +887,18 @@ async function main() {
     : await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
     const items = visibleByCategory.get(cfg.key) ?? [];
     if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
+    const targets = cachedRun && customKeywords.length > 0
+      ? items.filter((article) => (article.interestMatches?.length ?? 0) > 0 || !article.displayTitle || !article.summary)
+      : items;
+    if (targets.length === 0) {
+      const enriched = items.filter((article) => article.displayTitle && article.summary).length;
+      console.log(`[daily]  ${cfg.key.padEnd(12)} no new interest matches; cache coverage ${enriched}/${items.length}`);
+      return { key: cfg.key, requested: items.length, enriched };
+    }
     const t1 = Date.now();
     const results = await consolidatedEnrich(
       cfg.label,
-      items.map((a) => ({
+      targets.map((a) => ({
         url: a.url,
         title: a.title,
         excerpt: a.summary ?? a.excerpt,
@@ -881,7 +909,7 @@ async function main() {
       { customKeywords },
     );
     let matched = 0;
-    for (const a of items) {
+    for (const a of targets) {
       const r = results.get(a.url);
       if (r?.displayTitle) {
         a.displayTitle = r.displayTitle;
@@ -895,8 +923,9 @@ async function main() {
         matched++;
       }
     }
-    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${items.length} enriched in ${((Date.now()-t1)/1000).toFixed(1)}s`);
-    return { key: cfg.key, requested: items.length, enriched: matched };
+    const enriched = items.filter((article) => article.displayTitle && article.summary).length;
+    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${items.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
+    return { key: cfg.key, requested: items.length, enriched };
   }));
   const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 1);
   for (const category of enrichmentHealth) {
@@ -912,7 +941,9 @@ async function main() {
   // Phase 5: Trading signals (optional, non-fatal)
   let trading: TradingSection | null = null;
   try {
-    trading = await runTrading();
+    trading = cachedRun && customKeywords.length > 0
+      ? loadCachedReport(date)?.trading ?? null
+      : await runTrading();
   } catch (e) {
     console.warn(`[daily] trading section failed: ${e instanceof Error ? e.message : e}`);
   }

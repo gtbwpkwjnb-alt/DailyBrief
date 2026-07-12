@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
+import { selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { safeExternalUrl } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
@@ -94,4 +95,29 @@ test("editorial context separates publisher country from covered countries", () 
   assert.deepEqual(detectCoverageCountries("US and Iran discuss a new regional agreement"), ["美国", "伊朗"]);
   assert.deepEqual(normalizeCustomKeywords(" AI Agent,伊朗,AI Agent,这是一个很长的关键词超过限制 "), ["AI Agent", "伊朗", "这是一个很长的关键词超过限制"]);
   assert.equal(normalizeCustomKeywords("a,b,c,d,e,f,g,h,i").length, 8);
+});
+
+test("digest candidates prioritize explicit interest matches within a source", () => {
+  const selected = selectRoundRobin([
+    {
+      sourceId: "source-a",
+      source: "Source A",
+      title: "Recent unrelated item",
+      url: "https://example.com/recent",
+      category: "tech",
+      publishedAt: new Date("2026-07-12T08:00:00Z"),
+      interestMatches: [],
+    },
+    {
+      sourceId: "source-a",
+      source: "Source A",
+      title: "Older AI item",
+      url: "https://example.com/interest",
+      category: "tech",
+      publishedAt: new Date("2026-07-11T08:00:00Z"),
+      interestMatches: ["AI"],
+    },
+  ], 1);
+
+  assert.equal(selected[0]?.url, "https://example.com/interest");
 });

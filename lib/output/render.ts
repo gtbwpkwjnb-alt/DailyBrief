@@ -2020,7 +2020,7 @@ export function renderHtml(
       <button class="run-button" id="runDailyButton" type="button" title="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}" aria-label="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}">▶</button>
       <div class="run-status-copy">
         <p class="run-status-label" id="runStatusLabel">${REPORT_LOCALE === "en" ? "Ready" : "等待运行"}</p>
-        <p class="run-status-detail" id="runStatusDetail">${REPORT_LOCALE === "en" ? "Local service runs directly; Pages opens GitHub Actions" : "本地服务直接运行；Pages 跳转 GitHub Actions"}</p>
+        <p class="run-status-detail" id="runStatusDetail">${REPORT_LOCALE === "en" ? "Local service runs directly; Pages uses a secure remote endpoint" : "本地服务直接运行；Pages 使用安全远程启动端点"}</p>
       </div>
       <span class="run-progress-value" id="runProgressValue">0%</span>
     </div>
@@ -2102,6 +2102,12 @@ export function renderHtml(
     var runEndpoint = consoleEl.dataset.runEndpoint || '/api/run';
     var isPages = /\.github\.io$/i.test(location.hostname);
     var timer = null;
+    var remoteRequestedAt = 0;
+
+    function scheduleGithubPoll() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(pollGithub, 5000);
+    }
 
     function normalizeKeywords(raw) {
       var values = String(raw || '').split(/[\\n,，、;；|]+/);
@@ -2175,8 +2181,17 @@ export function renderHtml(
       fetch('https://api.github.com/repos/' + repository + '/actions/workflows/daily.yml/runs?per_page=1&t=' + Date.now(), { cache: 'no-store' })
         .then(function (response) { if (!response.ok) throw new Error('GitHub status unavailable'); return response.json(); })
         .then(function (payload) {
-          var run = payload.workflow_runs && payload.workflow_runs[0];
-          if (!run) return;
+          var runs = payload.workflow_runs || [];
+          var run = runs.find(function (item) {
+            if (!remoteRequestedAt) return true;
+            var createdAt = Date.parse(item.created_at || item.run_started_at || '');
+            return Number.isFinite(createdAt) && createdAt >= remoteRequestedAt - 90000;
+          });
+          if (!run) {
+            renderStatus({ status: 'running', stage: '已提交，等待远程任务创建', progress: 8, logs: ['GitHub Actions workflow_dispatch 已提交，等待新任务出现'] });
+            scheduleGithubPoll();
+            return;
+          }
           var running = run.status !== 'completed';
           renderStatus({
             status: running ? 'running' : run.conclusion === 'success' ? 'success' : 'error',
@@ -2194,10 +2209,13 @@ export function renderHtml(
                 renderStatus({ status: 'running', stage: stepName, progress: githubStepProgress(stepName), logs: [run.name + ' · ' + run.status, stepName] });
               })
               .catch(function () {})
-              .finally(function () { timer = setTimeout(pollGithub, 5000); });
+            .finally(scheduleGithubPoll);
           }
         })
-        .catch(function () {});
+        .catch(function (error) {
+          button.disabled = false;
+          renderStatus({ status: 'error', stage: '远程状态获取失败', progress: 0, logs: [error.message] });
+        });
     }
 
     function startRun() {
@@ -2206,6 +2224,7 @@ export function renderHtml(
       filterKeywords.textContent = keywordText(keywords);
       try { localStorage.setItem('dailybrief.customKeywords', keywordInput.value); } catch (_) {}
       button.disabled = true;
+      if (isPages) remoteRequestedAt = Date.now();
       renderStatus({ status: 'running', stage: '正在启动任务', progress: 2, logs: [] });
       fetch(runEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywords: keywords }) })
         .then(function (response) { return response.json().catch(function () { return {}; }).then(function (body) { if (!response.ok) throw new Error(body.error || (isPages ? '当前 GitHub Pages 未配置安全远程启动端点' : '启动接口不可用')); return body; }); })
