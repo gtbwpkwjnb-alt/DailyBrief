@@ -1034,6 +1034,7 @@ async function runConsolidatedOnce(
     const unsupported = item ? hasUnsupportedHighRiskClaim(item, value) : null;
     if (unsupported) {
       console.warn(`[enrich] rejected unsupported ${unsupported} claim for ${url}`);
+      if (item) result.set(url, evidenceFallback(item, unsupported));
       continue;
     }
     result.set(url, value);
@@ -1090,6 +1091,21 @@ export function hasUnsupportedHighRiskClaim(item: EnrichInput, value: Consolidat
   return null;
 }
 
+function evidenceFallback(item: EnrichInput, label: string): ConsolidatedValue {
+  const sourceTitle = item.title.trim();
+  const summary = REPORT_LOCALE === "en"
+    ? "The source does not provide verifiable " + label + " evidence. Title retained for manual review: " + sourceTitle
+    : "?????????" + label + "????????????" + sourceTitle;
+  return {
+    displayTitle: REPORT_LOCALE === "en" ? sourceTitle : "????" + sourceTitle,
+    summary,
+    tags: ["???"],
+    importance: 3,
+    coverageCountries: [],
+    interestMatches: [],
+  };
+}
+
 // ----- AI Review: quality check before publishing -----
 
 const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负责审阅即将发布的日报，确保内容质量。
@@ -1105,6 +1121,7 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
 6. **国际时政**：媒体所属国与文章涉及国是否区分；同一冲突、声明或行动的重复条目是否应合并。
 7. **发布阻断条件**：只有原文不支持的严重事实结论、明显编造、缺少摘要、未翻译或整栏不可用才设 passed=false。
 8. **非阻断问题**：重复事件、热搜措辞偏猜测、单条题材关联弱、来源比例不理想，写入 suggestions，不要因此设 passed=false。
+???????????/????????????????????????????????????????????
 
 只有缺少摘要、展示内容未翻译、存在无依据结论等发布级问题才设 passed=false；轻微文风建议和可优化的重复必须保持 passed=true。
 
@@ -1130,6 +1147,7 @@ Check:
 5. **Fact checking**: Check dates, competitions, scores, people, country relations, and whether trend keywords were incorrectly rewritten as verified events. A trend proves search interest, not that an event happened.
 6. **World news attribution**: Are publisher country and covered countries separated? Should duplicate reports about the same conflict, statement, or action be merged?
 7. **Publication blockers**: Set passed=false only for unsupported serious factual claims, fabrication, missing summaries, untranslated content, or an unusable section.
+An item marked for manual review is an intentional safe fallback after an unsupported claim was rejected; report it as a suggestion, not a blocker for the whole report.
 8. **Non-blocking issues**: Duplicate events, tentative trend wording, a weakly related item, or imperfect source balance belong in suggestions and must not set passed=false.
 
 Set passed=false only for publication-blocking issues such as missing summaries,
