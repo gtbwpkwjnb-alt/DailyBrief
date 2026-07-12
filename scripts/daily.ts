@@ -990,7 +990,7 @@ async function main() {
   const reviewT0 = Date.now();
   const reviewInput = CATEGORY_CONFIG.map((cfg) => {
     const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
-    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；摘要：${a.summary}`);
+    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);
