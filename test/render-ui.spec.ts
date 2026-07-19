@@ -35,6 +35,10 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   await expect(page.locator(".article-title")).toContainText(article.displayTitle!);
   await expect(page.locator(".article-excerpt")).toHaveCount(0);
   await expect(page.locator(".article-importance")).toContainText("8/10");
+  await expect(page.locator(".brief-meta-summary")).toBeVisible();
+  await expect(page.locator(".brief-meta-summary")).toContainText("1 个来源");
+  await expect(page.locator(".brief-meta-summary")).not.toContainText("0 个来源");
+  await page.locator(".brief-meta-summary").click();
   await expect(page.locator("#runDailyButton")).toBeVisible();
   expect(pageErrors).toEqual([]);
   expect((await page.screenshot()).byteLength).toBeGreaterThan(1_000);
@@ -63,8 +67,190 @@ test("world cards show publisher attribution and the incremental filter control"
   await expect(page.locator(".article-attribution")).toContainText("英国媒体");
   await expect(page.locator(".article-attribution")).toContainText("美国");
   await expect(page.locator(".article-attribution")).toContainText("伊朗");
+  await page.locator(".brief-meta-summary").click();
   await page.locator("#customFilterToggle").click();
   await expect(page.locator("#customFilterForm")).toBeVisible();
   await expect(page.locator("#customKeywordsInput")).toHaveAttribute("maxlength", "120");
   expect(pageErrors).toEqual([]);
+});
+
+test("Signal White theme remains readable without mobile overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const html = renderHtml(report, groupRaw([], sources), "2026-07-10", []);
+
+  await page.setContent(html);
+
+  const colors = {
+    background: await page.locator("body").evaluate(
+      (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
+    ),
+    header: await page.locator(".report-header").evaluate(
+      (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
+    ),
+    title: await page.locator(".report-title").evaluate(
+      (element: unknown) => (globalThis as any).getComputedStyle(element).color,
+    ),
+  };
+  const viewport = await page.evaluate(() => {
+    const browser = globalThis as any;
+    return {
+      width: browser.innerWidth,
+      scrollWidth: browser.document.documentElement.scrollWidth,
+    };
+  });
+
+  expect(colors).toEqual({
+    background: "rgb(244, 247, 250)",
+    header: "rgb(11, 19, 43)",
+    title: "rgb(248, 251, 255)",
+  });
+  expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.width);
+  await expect(page.locator(".tabs")).toBeVisible();
+  await expect(page.locator(".reading-context")).toBeVisible();
+});
+
+test("continuous stream keeps sections in one flow and progressively reveals more items", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const trending = Array.from({ length: 14 }, (_, index): ArticleInput => ({
+    sourceId: "google-trends-us",
+    source: "Google 热搜 · 美国",
+    title: `Trending item ${index + 1}`,
+    displayTitle: `连续热搜条目 ${index + 1}`,
+    url: `https://example.com/trending/${index + 1}`,
+    category: "trending",
+    summary: `用于验证连续信息流自动接入的第 ${index + 1} 条摘要。`,
+    tags: ["热搜", index % 2 === 0 ? "科技" : "社会"],
+    importance: 6,
+  }));
+  const tech: ArticleInput = {
+    sourceId: "github-trending",
+    source: "GitHub Trending",
+    title: "Continuous feed navigation",
+    displayTitle: "连续信息流导航",
+    url: "https://example.com/tech",
+    category: "tech",
+    summary: "验证点击栏目只负责滚动定位，不会隐藏其他栏目。",
+    tags: ["技术"],
+    importance: 8,
+  };
+  const politics: ArticleInput = {
+    sourceId: "bbc-world",
+    source: "BBC World",
+    title: "World update",
+    displayTitle: "国际动态更新",
+    url: "https://example.com/world-update",
+    category: "politics",
+    summary: "验证后续栏目能够自动接入同一条纵向信息流。",
+    tags: ["国际"],
+    importance: 7,
+  };
+  const html = renderHtml(report, groupRaw([...trending, tech, politics], sources), "2026-07-10", []);
+
+  await page.setContent(html);
+
+  await expect(page.locator("[data-panel='trending']")).toBeVisible();
+  await expect(page.locator(".article.stream-pending")).toHaveCount(4);
+  await page.locator(".tab[data-tab='tech']").click();
+  await expect(page.locator("[data-panel='tech']")).toBeVisible();
+  await expect(page.locator("[data-panel='trending']")).toBeVisible();
+  await expect(page.locator("#currentCategory")).toContainText("技术动态");
+  await expect(page.locator("#readingPosition")).toContainText("15 / 16");
+  await expect(page.locator(".panel:not(.active)")).toHaveCount(0);
+});
+
+test("mobile category spy keeps the active category inside the horizontal navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  const articles: ArticleInput[] = [
+    { sourceId: "google-trends-us", source: "Google Trends", title: "Trend", url: "https://example.com/t", category: "trending", summary: "趋势摘要" },
+    { sourceId: "github-trending", source: "GitHub Trending", title: "Tech", url: "https://example.com/a", category: "tech", summary: "技术摘要" },
+    { sourceId: "bbc-world", source: "BBC World", title: "World", url: "https://example.com/p", category: "politics", summary: "国际摘要" },
+    { sourceId: "wallstreetcn", source: "WallstreetCN", title: "Finance", url: "https://example.com/f", category: "finance", summary: "财经摘要" },
+    { sourceId: "v2ex-hot", source: "V2EX", title: "Community", url: "https://example.com/c", category: "tech", summary: "社区摘要" },
+  ];
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+
+  await page.setContent(html);
+  const communityTab = page.locator(".tab[data-tab='community']");
+  await communityTab.click();
+  await expect(communityTab).toHaveClass(/active/);
+  await expect.poll(async () => communityTab.evaluate((element) => {
+    const tab = element.getBoundingClientRect();
+    const nav = element.parentElement!.getBoundingClientRect();
+    return tab.left >= nav.left && tab.right <= nav.right;
+  })).toBe(true);
+});
+
+test("edition polling preserves existing query parameters", async ({ page }) => {
+  const requests: string[] = [];
+  const html = renderHtml(report, groupRaw([], sources), "2026-07-10", [], undefined, undefined, {
+    fetchedSources: 1,
+    successfulSources: 1,
+    sourceSuccessRate: 1,
+    fetchedArticles: 1,
+    dedupedArticles: 1,
+    generatedAt: "2026-07-10T08:00:00.000Z",
+    mode: "fresh",
+  });
+  await page.clock.install();
+  await page.route("https://brief.test/report**", async (route) => {
+    requests.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: "text/html", body: html });
+  });
+
+  await page.goto("https://brief.test/report?view=compact");
+  requests.length = 0;
+  await page.clock.fastForward(180_000);
+  await expect.poll(() => requests.find((url) => url.includes("edition=")) ?? "").not.toBe("");
+
+  const refreshUrl = new URL(requests.find((url) => url.includes("edition="))!);
+  expect(refreshUrl.searchParams.get("view")).toBe("compact");
+  expect(refreshUrl.searchParams.get("edition")).toMatch(/^\d+$/);
+});
+
+test("tag navigation reveals a matching article beyond the current batch", async ({ page }) => {
+  const articles = Array.from({ length: 13 }, (_, index): ArticleInput => ({
+    sourceId: "google-trends-us",
+    source: "Google Trends",
+    title: `Tagged item ${index + 1}`,
+    url: `https://example.com/tagged/${index + 1}`,
+    category: "trending",
+    summary: `标签跳转测试 ${index + 1}`,
+    tags: [index === 12 ? "后续目标" : "首批标签"],
+  }));
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+
+  await page.setContent(html);
+  const target = page.locator(".article[data-article-url='https://example.com/tagged/13']");
+  await expect(target).toHaveClass(/stream-pending/);
+  await page.locator(".brief-meta-summary").click();
+  await page.locator(".tag-cloud-chip[data-tag='后续目标']").click();
+  await expect(target).not.toHaveClass(/stream-pending/);
+  await expect(target).toBeVisible();
+});
+
+test("reload anchor restores the matching article after page load", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const articles = Array.from({ length: 14 }, (_, index): ArticleInput => ({
+    sourceId: "google-trends-us",
+    source: "Google Trends",
+    title: `Restored item ${index + 1}`,
+    url: `https://example.com/restored/${index + 1}`,
+    category: "trending",
+    summary: `刷新后阅读位置恢复测试 ${index + 1}`,
+  }));
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+  await page.route("https://brief.test/restore", async (route) => {
+    await route.fulfill({ status: 200, contentType: "text/html", body: html });
+  });
+
+  await page.goto("https://brief.test/restore");
+  const targetUrl = "https://example.com/restored/13";
+  await page.evaluate((url) => (globalThis as any).sessionStorage.setItem("dailybrief.reloadAnchor", url), targetUrl);
+  await page.reload({ waitUntil: "load" });
+
+  const target = page.locator(`.article[data-article-url='${targetUrl}']`);
+  await expect(target).not.toHaveClass(/stream-pending/);
+  await expect(target).toBeInViewport();
+  await expect.poll(() => page.evaluate(() => (globalThis as any).scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (globalThis as any).sessionStorage.getItem("dailybrief.reloadAnchor"))).toBeNull();
 });

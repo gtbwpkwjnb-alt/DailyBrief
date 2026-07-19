@@ -241,11 +241,11 @@ const SUBCATEGORY_LABELS: Record<string, string> = {
  * finance:news, politics:world) ignore this — they use MERGED_SUBGROUP_LIMITS.
  */
 const SOURCE_DISPLAY_LIMITS: Record<string, number> = {
-  "tech:github-trending": 10,
-  "tech:cn-community": 10,
-  "tech:overseas-community": 10,
-  "tech:x-viral": 8,
-  "tech:trending-papers": 10,
+  "tech:github-trending": 14,
+  "tech:cn-community": 16,
+  "tech:overseas-community": 16,
+  "tech:x-viral": 12,
+  "tech:trending-papers": 14,
 };
 
 /**
@@ -281,21 +281,21 @@ function displayLimitFor(
  * Exported so daily.ts can read the cap to keep enrichment in sync.
  */
 export const MERGED_SUBGROUP_LIMITS: Record<string, number> = {
-	  "trending:google-trends": 10,
-	  "trending:cn-trending": 10,
-	  "trending:reddit-trending": 10,
-	  "tech:ai-news": 12,
-	  "tech:overseas-news": 10,
-	  "tech:overseas": 10,
-	  "tech:blog-weekly": 6,
-	  "finance:news": 12,
-	  "politics:uk": 6,
-	  "politics:us": 6,
-	  "politics:france": 6,
-	  "politics:japan": 6,
-	  "politics:india": 6,
-	  "politics:east-asia": 6,
-	  "politics:other": 6,
+	  "trending:google-trends": 14,
+	  "trending:cn-trending": 14,
+	  "trending:reddit-trending": 14,
+	  "tech:ai-news": 18,
+	  "tech:overseas-news": 15,
+	  "tech:overseas": 15,
+	  "tech:blog-weekly": 10,
+	  "finance:news": 18,
+	  "politics:uk": 9,
+	  "politics:us": 9,
+	  "politics:france": 9,
+	  "politics:japan": 9,
+	  "politics:india": 9,
+	  "politics:east-asia": 9,
+	  "politics:other": 9,
 };
 
 /**
@@ -515,6 +515,10 @@ function formatDate(d: Date | undefined): string {
   }
 }
 
+function streamAnchor(...parts: string[]): string {
+  return `stream-${parts.join("-").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
+}
+
 // ----- raw article renderers -----
 
 function renderArticleHtml(a: ArticleInput, showSource = false): string {
@@ -564,13 +568,15 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const interestMatches = a.interestMatches ?? [];
   const tags = a.tags && a.tags.length > 0 ? a.tags : null;
   const tagAttr = tags ? ` data-tags="${escapeHtml(tags.join(","))}"` : "";
+  const visibleTags = (tags ?? []).slice(0, 2);
+  const hiddenTagCount = Math.max(0, (tags?.length ?? 0) - visibleTags.length);
 
-  return `<article class="article"${tagAttr}>
+  return `<article class="article" data-article-url="${url}"${tagAttr}>
     ${metaHtml || importance ? `<p class="article-meta">${metaHtml}${metaHtml && importance ? " · " : ""}${importance ? `<span class="article-importance importance-${importance >= 8 ? "high" : importance >= 5 ? "mid" : "low"}">${REPORT_LOCALE === "en" ? "Importance" : "重要度"} ${importance}/10</span>` : ""}</p>` : ""}
     ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>` : ""}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
     ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel}</span> ` : ""}${summary}</p>` : ""}
-    ${tags || interestMatches.length > 0 ? `<p class="article-tags">${(tags ?? []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}${interestMatches.map((keyword) => `<span class="tag interest-tag">兴趣：${escapeHtml(keyword)}</span>`).join("")}</p>` : ""}
+    ${tags || interestMatches.length > 0 ? `<p class="article-tags">${visibleTags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}${hiddenTagCount > 0 ? `<span class="tag tag-more">+${hiddenTagCount}</span>` : ""}${interestMatches.slice(0, 1).map((keyword) => `<span class="tag interest-tag">兴趣：${escapeHtml(keyword)}</span>`).join("")}</p>` : ""}
     ${excerpt && !(REPORT_LOCALE === "zh" && summary) ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
     ${url && (metaHtml || showTitle) ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${escapeHtml(a.title)}">🔗</a>` : ""}
   </article>`;
@@ -580,7 +586,7 @@ function renderSourceContent(
   category: Category,
   subId: string,
   source: SourceGroup,
-  isActive: boolean,
+  showHeading: boolean,
 ): string {
   const showSource = source.merged === true;
   // Filter out articles that have no meaningful content:
@@ -590,9 +596,11 @@ function renderSourceContent(
     (a) => a.summary || (a.excerpt && a.excerpt.length > 30) || a.title,
   );
   if (visibleItems.length === 0) return "";
-  return `<div class="source-content${isActive ? " active" : ""}" data-source-content="${escapeHtml(source.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">
+  const sourceAnchor = streamAnchor(category, subId, source.sourceId);
+  return `<section class="source-content active" id="${sourceAnchor}" data-source-content="${escapeHtml(source.sourceId)}" data-source-label="${escapeHtml(source.sourceName)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">
+    ${showHeading ? `<header class="stream-source-heading"><span>${escapeHtml(source.sourceName)}</span><span>${visibleItems.length}</span></header>` : ""}
     ${visibleItems.map((a) => renderArticleHtml(a, showSource)).join("\n")}
-  </div>`;
+  </section>`;
 }
 
 function renderSourceTabs(
@@ -604,21 +612,23 @@ function renderSourceTabs(
   // label already identifies the dataset. L3 only earns its row when there
   // are ≥2 sources to switch between (e.g. 社区讨论 V2EX vs LinuxDo).
   if (sources.length < 2) return "";
-  return `<nav class="source-tabs"><button class="source-tab" data-source="__all__" data-sub="${escapeHtml(subId)}" data-cat="${category}">${REPORT_LOCALE === "en" ? "All" : "全部"}<span class="count">${sources.reduce((n, s) => n + s.items.length, 0)}</span></button>${sources
+  return `<nav class="source-tabs" aria-label="${REPORT_LOCALE === "en" ? "Source shortcuts" : "来源定位"}"><button class="source-tab active" type="button" data-scroll-target="${streamAnchor(category, subId)}" data-source="__all__" data-sub="${escapeHtml(subId)}" data-cat="${category}">${REPORT_LOCALE === "en" ? "All" : "全部"}<span class="count">${sources.reduce((n, s) => n + s.items.length, 0)}</span></button>${sources
     .map(
-      (s, i) =>
-        `<button class="source-tab${i === 0 ? " active" : ""}" data-source="${escapeHtml(s.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">${escapeHtml(s.sourceName)}<span class="count">${s.items.length}</span></button>`,
+      (s) =>
+        `<button class="source-tab" type="button" data-scroll-target="${streamAnchor(category, subId, s.sourceId)}" data-source="${escapeHtml(s.sourceId)}" data-sub="${escapeHtml(subId)}" data-cat="${category}">${escapeHtml(s.sourceName)}<span class="count">${s.items.length}</span></button>`,
     )
     .join("")}</nav>`;
 }
 
-function renderSubContent(category: Category, sub: SubGroup, isActive: boolean): string {
-  return `<div class="sub-content${isActive ? " active" : ""}" data-sub-content="${escapeHtml(sub.id)}" data-cat="${category}">
+function renderSubContent(category: Category, sub: SubGroup): string {
+  const count = sub.sources.reduce((total, source) => total + source.items.length, 0);
+  return `<section class="sub-content active" id="${streamAnchor(category, sub.id)}" data-sub-content="${escapeHtml(sub.id)}" data-sub-label="${escapeHtml(sub.name)}" data-cat="${category}">
+    <header class="stream-sub-heading"><h2>${escapeHtml(sub.name)}</h2><span>${count}</span></header>
     ${renderSourceTabs(category, sub.id, sub.sources)}
     <div class="source-contents">
-      ${sub.sources.map((s, i) => renderSourceContent(category, sub.id, s, i === 0)).join("\n")}
+      ${sub.sources.map((source) => renderSourceContent(category, sub.id, source, sub.sources.length > 1)).join("\n")}
     </div>
-  </div>`;
+  </section>`;
 }
 
 function renderRawCategoryPanel(
@@ -634,18 +644,18 @@ function renderRawCategoryPanel(
     return summaryHtml + `<p class="empty">${STR.emptyCategory}</p>`;
   }
   if (nonEmpty.length === 1) {
-    return summaryHtml + renderSubContent(category, nonEmpty[0], true);
+    return summaryHtml + renderSubContent(category, nonEmpty[0]);
   }
   const subTabs = nonEmpty
-    .map((s, i) => {
+    .map((s, index) => {
       const count = s.sources.reduce((n, src) => n + src.items.length, 0);
-      return `<button class="sub-tab${i === 0 ? " active" : ""}" data-sub="${escapeHtml(s.id)}" data-cat="${category}">${escapeHtml(s.name)}<span class="count">${count}</span></button>`;
+      return `<button class="sub-tab${index === 0 ? " active" : ""}" type="button" data-scroll-target="${streamAnchor(category, s.id)}" data-sub="${escapeHtml(s.id)}" data-cat="${category}">${escapeHtml(s.name)}<span class="count">${count}</span></button>`;
     })
     .join("");
   const panels = nonEmpty
-    .map((s, i) => renderSubContent(category, s, i === 0))
+    .map((s) => renderSubContent(category, s))
     .join("\n");
-  return `<nav class="sub-tabs">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
+  return `<nav class="sub-tabs" aria-label="${REPORT_LOCALE === "en" ? "Section shortcuts" : "子栏目定位"}">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
 }
 
 // ----- tag cloud -----
@@ -720,10 +730,10 @@ function renderCategorySummary(key: string, summaries?: Record<string, string>):
   const text = summaries?.[key];
   if (!text) return "";
   const label = REPORT_LOCALE === "en" ? "AI Summary" : "📋 AI 分析";
-  return `<div class="category-summary">
-    <span class="category-summary-eyebrow">${label}</span>
+  return `<details class="category-summary">
+    <summary><span class="category-summary-eyebrow">${label}</span><span>${REPORT_LOCALE === "en" ? "Expand" : "展开"}</span></summary>
     <p>${escapeHtml(text)}</p>
-  </div>`;
+  </details>`;
 }
 
 // ----- AI review panel -----
@@ -804,6 +814,18 @@ export function renderHtml(
 	    politics: sumItems(raw.politics),
 	    community: sumItems(techCommunitySubs),
 	  };
+  const totalStreamItems = counts.trending + counts.tech + counts.politics + counts.finance + counts.community;
+  const renderedSourceCount = new Set(
+    (Object.keys(raw) as Category[]).flatMap((category) =>
+      raw[category].flatMap((sub) =>
+        sub.sources.flatMap((source) => source.items.map((article) => article.sourceId)),
+      ),
+    ),
+  ).size;
+  const sourceCount = runStats && runStats.successfulSources > 0
+    ? runStats.successfulSources
+    : renderedSourceCount > 0 ? renderedSourceCount : undefined;
+  const editionStats = `${totalStreamItems} ${REPORT_LOCALE === "en" ? "items" : "条信息"}${sourceCount === undefined ? "" : ` · ${sourceCount} ${REPORT_LOCALE === "en" ? "sources" : "个来源"}`}`;
   const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
   const failedHtml = failedSources && failedSources.length > 0
     ? `<details class="failed-sources">
@@ -827,113 +849,124 @@ export function renderHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${STR.siteTitle} · ${date}</title>
 <meta name="description" content="AI 智能每日简报 · 全球优质信息聚合·AI 分类精炼·深度分析">
+<meta name="dailybrief-generated-at" content="${escapeHtml(runStats?.generatedAt ?? "")}">
 <style>
   :root {
-    --bg: #fafaf9;
+    --bg: #f4f7fa;
     --bg-elevated: #ffffff;
-    --fg: #0c0c0c;
-    --fg-soft: #3f3f46;
-    --muted: #71717a;
-    --rule: #e4e4e7;
-    --card: #f0f0f2;
-    --link: #2563eb;
-    --accent: #0c0c0c;
-    --accent-fg: #fafaf9;
-    --rank-high-bg: #fee2e2;
-    --rank-high-fg: #991b1b;
-    --rank-mid-bg: #fef3c7;
-    --rank-mid-fg: #92400e;
-    --rank-low-bg: #e0e7ff;
-    --rank-low-fg: #3730a3;
-    --cat-trending: #f59e0b;
-    --cat-tech: #3b82f6;
-    --cat-finance: #10b981;
-    --cat-politics: #8b5cf6;
-    --cat-trading: #f97316;
-    --cat-community: #ec4899;
-    --hero-grad-from: #fafaf9;
-    --hero-grad-to: #f0f0f2;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-    --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
-    --shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
-    --radius: 0.625rem;
-    --radius-sm: 0.375rem;
+    --fg: #0b132b;
+    --fg-soft: #334155;
+    --muted: #607086;
+    --rule: #d9e2ec;
+    --card: #eaf0f6;
+    --link: #006dff;
+    --accent: #0b132b;
+    --accent-fg: #f8fbff;
+    --rank-high-bg: #ffe4e2;
+    --rank-high-fg: #b42318;
+    --rank-mid-bg: #fff1cc;
+    --rank-mid-fg: #9a6700;
+    --rank-low-bg: #e5edff;
+    --rank-low-fg: #3157b7;
+    --cat-trending: #f04438;
+    --cat-tech: #247bff;
+    --cat-finance: #009e74;
+    --cat-politics: #7c4dff;
+    --cat-trading: #e06b00;
+    --cat-community: #d13c8a;
+    --hero-grad-from: #eaf3ff;
+    --hero-grad-to: #f8fbff;
+    --shadow-sm: 0 1px 2px rgba(11,19,43,0.05);
+    --shadow-md: 0 6px 18px rgba(11,19,43,0.08);
+    --shadow-lg: 0 12px 32px rgba(11,19,43,0.12);
+    --radius: 0.5rem;
+    --radius-sm: 0.35rem;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #09090b;
-      --bg-elevated: #141418;
-      --fg: #fafafa;
-      --fg-soft: #d4d4d8;
-      --muted: #a1a1aa;
-      --rule: #27272a;
-      --card: #1a1a1f;
-      --link: #60a5fa;
-      --accent: #fafafa;
-      --accent-fg: #09090b;
+      --bg: #0b1322;
+      --bg-elevated: #111d30;
+      --fg: #f5f8fc;
+      --fg-soft: #d5deea;
+      --muted: #91a4bb;
+      --rule: #253852;
+      --card: #17263c;
+      --link: #5aa2ff;
+      --accent: #f5f8fc;
+      --accent-fg: #0b1322;
       --rank-high-bg: rgba(239,68,68,0.15);
       --rank-high-fg: #fca5a5;
       --rank-mid-bg: rgba(245,158,11,0.15);
       --rank-mid-fg: #fcd34d;
       --rank-low-bg: rgba(99,102,241,0.15);
       --rank-low-fg: #a5b4fc;
-      --cat-trending: #fbbf24;
-      --cat-tech: #60a5fa;
-      --cat-finance: #34d399;
-      --cat-politics: #a78bfa;
-      --cat-trading: #fb923c;
-      --cat-community: #f472b6;
-      --hero-grad-from: #141418;
-      --hero-grad-to: #09090b;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
-      --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
-      --shadow-lg: 0 4px 16px rgba(0,0,0,0.4);
+      --cat-trending: #ff776d;
+      --cat-tech: #75b4ff;
+      --cat-finance: #49d9ac;
+      --cat-politics: #b99cff;
+      --cat-trading: #ffac5c;
+      --cat-community: #ff82c2;
+      --hero-grad-from: #172b45;
+      --hero-grad-to: #0f1d31;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.22);
+      --shadow-md: 0 6px 18px rgba(0,0,0,0.28);
+      --shadow-lg: 0 12px 32px rgba(0,0,0,0.36);
     }
   }
   *, *::before, *::after { box-sizing: border-box; }
-  html { scroll-behavior: smooth; font-size: 17px; }
+  html { scroll-behavior: smooth; font-size: 16px; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-      "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    line-height: 1.7;
+    font-family: "Cabinet Grotesk", "Segoe UI Variable", -apple-system,
+      BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.62;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
   main {
-    max-width: 1000px;
+    max-width: 1180px;
     margin: 0 auto;
-    padding: 2rem 1.5rem 4rem;
+    padding: 1.25rem 1.25rem 3.5rem;
   }
-  @media (min-width: 640px) { main { padding: 3rem 2rem 5rem; } }
+  @media (min-width: 640px) { main { padding: 2rem 2rem 4rem; } }
 
   /* ===== header ===== */
-  header.report-header { margin-bottom: 1.5rem; }
+  header.report-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 0.25rem 1rem;
+    margin-bottom: 1rem;
+    padding: 1.25rem 1.5rem;
+    background: #0b132b;
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow-md);
+  }
   .eyebrow {
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.25em;
-    color: var(--muted);
+    color: #9fb2c8;
     font-weight: 600;
   }
   h1.report-title {
     font-size: 2.5rem;
     font-weight: 800;
-    margin: 0.3rem 0 1rem;
-    letter-spacing: -0.03em;
+    margin: 0.3rem 0 0.5rem;
+    letter-spacing: 0;
     line-height: 1.05;
-    color: var(--fg);
+    color: #f8fbff;
   }
   @media (max-width: 640px) {
     h1.report-title { font-size: 1.75rem; }
   }
   .archive-link {
     display: inline-block;
-    margin-bottom: 0.75rem;
+    margin: 0.2rem 0 0;
     font-size: 0.82rem;
-    color: var(--muted);
+    color: #b5c4d5;
     text-decoration: none;
     border-bottom: 1px dashed var(--rule);
     padding-bottom: 1px;
@@ -941,11 +974,19 @@ export function renderHtml(
   }
   .archive-link:hover { color: var(--link); border-bottom-style: solid; }
 
+  header.report-header .archive-link {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+    color: #d9e7f6;
+    border-bottom-color: rgba(217,231,246,0.42);
+  }
+
   .update-time {
     display: block;
     font-size: 0.72rem;
-    color: var(--muted);
-    margin-bottom: 0.5rem;
+    color: #9fb2c8;
+    margin: 0;
     font-variant-numeric: tabular-nums;
   }
 
@@ -2004,6 +2045,512 @@ export function renderHtml(
 	  .source-tab:hover .count, .sub-tab:hover .count {
 	    transform: scale(1.15);
 	  }
+
+	  /* ===== Signal White: hierarchy, density, and responsive reading ===== */
+	  main { overflow-x: clip; }
+	  .eyebrow { color: var(--muted); }
+	  header.report-header .eyebrow { color: #9fb2c8; }
+	  .hero-card {
+	    background: var(--hero-grad-from);
+	    backdrop-filter: none;
+	    -webkit-backdrop-filter: none;
+	  }
+	  .eyebrow,
+	  .hero-eyebrow,
+	  .category-title,
+	  .brief-source,
+	  .brief-rank,
+	  .summary-label,
+	  .tag,
+	  .category-summary-eyebrow,
+	  .tag-cloud-heading,
+	  .tag-cloud-chip,
+	  .failed-sources-heading,
+	  .widget-label,
+	  .trading-section-title,
+	  .review-eyebrow { letter-spacing: 0; }
+
+	  .run-console {
+	    margin: 0 0 0.75rem;
+	    padding: 0.9rem 1rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-left: 4px solid var(--link);
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .run-button {
+	    background: var(--link);
+	    color: #ffffff;
+	  }
+	  .run-status-label { font-size: 0.84rem; }
+	  .run-status-detail { font-size: 0.74rem; }
+	  .run-progress-bar { background: var(--link); }
+
+	  .filter-console {
+	    margin: 0 0 0.75rem;
+	    padding: 0.8rem 1rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .filter-console-title { color: var(--fg); }
+	  .filter-custom-button,
+	  .filter-custom-actions button { border-radius: 0.3rem; }
+
+	  .tag-cloud {
+	    margin: 0 0 0.75rem;
+	    padding: 0.75rem 0;
+	    background: transparent;
+	    border: 0;
+	    border-top: 1px solid var(--rule);
+	    border-bottom: 1px solid var(--rule);
+	    border-radius: 0;
+	  }
+	  .tag-cloud-heading { margin-bottom: 0.5rem; color: var(--fg-soft); }
+	  .tag-cloud-body { gap: 0.3rem; }
+	  .tag-cloud-chip { border-radius: 0.35rem; }
+	  .tag-cloud-fade { background: linear-gradient(transparent, var(--bg)); }
+
+	  .failed-sources,
+	  .review-panel {
+	    margin: 0 0 0.75rem;
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .review-panel { padding: 0.9rem 1rem; }
+	  .review-panel.passed { background: #f2fbf7; }
+	  .review-panel.has-issues { background: #fff8e8; }
+
+	  .tabs {
+	    position: sticky;
+	    top: 0;
+	    z-index: 20;
+	    gap: 0.2rem;
+	    margin: 1rem 0 0.85rem;
+	    padding: 0.45rem 0 0;
+	    background: color-mix(in srgb, var(--bg) 94%, transparent);
+	    border-bottom: 1px solid var(--rule);
+	    backdrop-filter: blur(10px);
+	    -webkit-backdrop-filter: blur(10px);
+	  }
+	  .tab {
+	    --tab-color: var(--link);
+	    min-height: 2.55rem;
+	    padding: 0.55rem 0.8rem;
+	    border-radius: 0.35rem 0.35rem 0 0;
+	    font-size: 0.86rem;
+	  }
+	  .tab::after {
+	    height: 3px;
+	    background: var(--tab-color);
+	  }
+	  .tab.active {
+	    color: var(--tab-color);
+	    background: color-mix(in srgb, var(--tab-color) 8%, transparent);
+	  }
+	  .tab[data-tab="trending"] { --tab-color: var(--cat-trending); }
+	  .tab[data-tab="tech"] { --tab-color: var(--cat-tech); }
+	  .tab[data-tab="trading"] { --tab-color: var(--cat-trading); }
+	  .tab[data-tab="politics"] { --tab-color: var(--cat-politics); }
+	  .tab[data-tab="finance"] { --tab-color: var(--cat-finance); }
+	  .tab[data-tab="community"] { --tab-color: var(--cat-community); }
+	  .tab .count {
+	    background: color-mix(in srgb, var(--tab-color) 10%, var(--bg-elevated));
+	    color: inherit;
+	  }
+
+	  .sub-tabs {
+	    flex-wrap: nowrap;
+	    gap: 0.2rem;
+	    margin: 0.75rem 0;
+	    padding: 0.25rem;
+	    overflow-x: auto;
+	    background: var(--card);
+	    border-radius: var(--radius);
+	    scrollbar-width: none;
+	  }
+	  .sub-tabs::-webkit-scrollbar { display: none; }
+	  .sub-tab {
+	    flex: 0 0 auto;
+	    padding: 0.42rem 0.75rem;
+	    background: transparent;
+	    border-radius: 0.3rem;
+	    font-size: 0.8rem;
+	  }
+	  .sub-tab.active {
+	    background: var(--bg-elevated);
+	    color: var(--fg);
+	    box-shadow: var(--shadow-sm);
+	  }
+
+	  .source-tabs {
+	    flex-wrap: nowrap;
+	    gap: 0.85rem;
+	    margin: 0.6rem 0 0.8rem;
+	    padding: 0 0 0.45rem;
+	    overflow-x: auto;
+	    scrollbar-width: none;
+	  }
+	  .source-tabs::-webkit-scrollbar { display: none; }
+	  .source-tab {
+	    flex: 0 0 auto;
+	    padding: 0.25rem 0;
+	    background: transparent;
+	    border: 0;
+	    border-bottom: 2px solid transparent;
+	    border-radius: 0;
+	    font-size: 0.76rem;
+	  }
+	  .source-tab.active {
+	    background: transparent;
+	    color: var(--link);
+	    border-color: var(--link);
+	    box-shadow: none;
+	  }
+
+	  .category-summary {
+	    margin: 0.65rem 0 0.8rem;
+	    padding: 0.9rem 1rem;
+	    background: #eaf3ff;
+	    border: 1px solid #cfe2ff;
+	    border-left: 4px solid var(--link);
+	    border-radius: var(--radius);
+	    color: var(--fg-soft);
+	  }
+	  .category-summary-eyebrow { color: var(--link); }
+
+	  .brief-list { gap: 0.6rem; }
+	  .brief {
+	    padding: 0.85rem 0.95rem;
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .brief-title { font-size: 0.95rem; line-height: 1.45; }
+	  .brief-summary { font-size: 0.86rem; line-height: 1.62; }
+
+	  .article {
+	    margin: 0 -0.65rem;
+	    padding: 0.8rem 0.65rem;
+	  }
+	  .article:first-child { padding-top: 0.65rem; }
+	  .article:hover {
+	    margin: 0 -0.65rem;
+	    padding-left: 0.65rem;
+	    padding-right: 0.65rem;
+	    background: color-mix(in srgb, var(--link) 5%, var(--bg-elevated));
+	  }
+	  .article-title { font-size: 0.96rem; line-height: 1.42; }
+	  .article-meta { font-size: 0.72rem; }
+	  .article-summary {
+	    padding: 0.55rem 0.75rem;
+	    background: #eef5ff;
+	    border-left-color: var(--link);
+	    font-size: 0.88rem;
+	    line-height: 1.62;
+	  }
+	  .article-excerpt { max-width: 82ch; }
+	  .tag { border-radius: 0.25rem; }
+	  .tag-more { color: var(--muted); background: transparent; }
+
+	  .brief-meta {
+	    margin-bottom: 0.75rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .brief-meta-summary {
+	    display: flex;
+	    align-items: center;
+	    justify-content: space-between;
+	    gap: 1rem;
+	    min-height: 2.8rem;
+	    padding: 0.65rem 0.9rem;
+	    color: var(--fg-soft);
+	    cursor: pointer;
+	    list-style: none;
+	    font-size: 0.78rem;
+	  }
+	  .brief-meta-summary::-webkit-details-marker { display: none; }
+	  .brief-meta-summary span:first-child { color: var(--fg); font-weight: 700; }
+	  .brief-meta-body { padding: 0 0.75rem 0.1rem; }
+	  .brief-meta .run-console,
+	  .brief-meta .filter-console,
+	  .brief-meta .tag-cloud,
+	  .brief-meta .failed-sources,
+	  .brief-meta .review-panel { box-shadow: none; }
+
+	  .stream-layout {
+	    display: grid;
+	    grid-template-columns: 220px minmax(0, 1fr);
+	    align-items: start;
+	    gap: 1.25rem;
+	  }
+	  .stream-navigation {
+	    position: sticky;
+	    top: 0.75rem;
+	    z-index: 25;
+	  }
+	  .stream-navigation .tabs {
+	    position: static;
+	    display: grid;
+	    gap: 0.18rem;
+	    margin: 0;
+	    padding: 0.35rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .stream-navigation .tab {
+	    display: flex;
+	    align-items: center;
+	    justify-content: space-between;
+	    width: 100%;
+	    min-height: 2.3rem;
+	    padding: 0.5rem 0.65rem;
+	    border-radius: 0.3rem;
+	    text-align: left;
+	  }
+	  .stream-navigation .tab::after { display: none; }
+	  .reading-context {
+	    margin-top: 0.55rem;
+	    padding: 0.7rem 0.75rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .reading-context p { margin: 0; }
+	  .reading-context-path {
+	    display: grid;
+	    gap: 0.1rem;
+	    font-size: 0.76rem;
+	    font-weight: 700;
+	    color: var(--fg);
+	  }
+	  .reading-context-path span:last-child { color: var(--muted); font-size: 0.68rem; font-weight: 500; }
+	  .reading-context-detail {
+	    display: flex;
+	    justify-content: space-between;
+	    gap: 0.5rem;
+	    margin-top: 0.45rem !important;
+	    font-size: 0.65rem;
+	    color: var(--muted);
+	  }
+	  .reading-progress {
+	    height: 3px;
+	    margin-top: 0.45rem;
+	    overflow: hidden;
+	    background: var(--card);
+	    border-radius: 999px;
+	  }
+	  .reading-progress span { display: block; width: 0; height: 100%; background: var(--link); transition: width 0.18s ease; }
+	  .update-available {
+	    width: 100%;
+	    margin-top: 0.55rem;
+	    padding: 0.55rem 0.65rem;
+	    background: var(--link);
+	    color: #fff;
+	    border: 0;
+	    border-radius: var(--radius);
+	    font: inherit;
+	    font-size: 0.72rem;
+	    font-weight: 700;
+	    cursor: pointer;
+	  }
+	  .stream-feed { min-width: 0; }
+	  .panel.stream-section {
+	    display: block;
+	    scroll-margin-top: 0.8rem;
+	    margin: 0 0 1.4rem;
+	    padding: 0.9rem 1rem 0.35rem;
+	    background: var(--bg-elevated);
+	    border: 1px solid var(--rule);
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .stream-category-heading,
+	  .stream-sub-heading,
+	  .stream-source-heading {
+	    display: flex;
+	    align-items: baseline;
+	    justify-content: space-between;
+	    gap: 1rem;
+	  }
+	  .stream-category-heading {
+	    margin-bottom: 0.4rem;
+	    padding-bottom: 0.55rem;
+	    border-bottom: 2px solid var(--rule);
+	  }
+	  .stream-category-heading h2 { margin: 0; font-size: 1.05rem; }
+	  .stream-category-heading span,
+	  .stream-sub-heading > span,
+	  .stream-source-heading span:last-child { color: var(--muted); font-size: 0.68rem; }
+	  .sub-content {
+	    display: block;
+	    scroll-margin-top: 0.8rem;
+	    padding-top: 0.45rem;
+	  }
+	  .sub-content + .sub-content { margin-top: 1.2rem; border-top: 1px solid var(--rule); }
+	  .stream-sub-heading { margin-bottom: 0.3rem; }
+	  .stream-sub-heading h2 { margin: 0; font-size: 0.9rem; color: var(--fg-soft); }
+	  .source-content {
+	    display: block;
+	    scroll-margin-top: 0.8rem;
+	  }
+	  .source-content + .source-content { margin-top: 0.8rem; }
+	  .stream-source-heading {
+	    position: sticky;
+	    top: 0;
+	    z-index: 3;
+	    margin: 0 -0.2rem;
+	    padding: 0.35rem 0.2rem;
+	    background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+	    border-bottom: 1px solid var(--rule);
+	    backdrop-filter: blur(8px);
+	    color: var(--fg-soft);
+	    font-size: 0.72rem;
+	    font-weight: 700;
+	  }
+	  .sub-tabs,
+	  .source-tabs { scroll-margin-top: 0.8rem; }
+	  .article.stream-pending { display: none; }
+	  .stream-deferred { display: none !important; }
+	  .article.stream-revealed { animation: streamReveal 0.24s ease both; }
+	  @keyframes streamReveal {
+	    from { opacity: 0; transform: translateY(6px); }
+	    to { opacity: 1; transform: translateY(0); }
+	  }
+	  .stream-loader {
+	    padding: 0.85rem;
+	    color: var(--muted);
+	    text-align: center;
+	    font-size: 0.72rem;
+	  }
+	  .category-summary summary {
+	    display: flex;
+	    justify-content: space-between;
+	    gap: 1rem;
+	    cursor: pointer;
+	    list-style: none;
+	  }
+	  .category-summary summary::-webkit-details-marker { display: none; }
+	  .category-summary summary > span:last-child { color: var(--muted); font-size: 0.68rem; }
+	  .category-summary p { margin-top: 0.55rem; }
+
+	  .crypto-widget,
+	  .trading-pick,
+	  .ticker-card { border-radius: var(--radius); }
+	  .trading-overview-card {
+	    background: #eef5ff;
+	    border: 1px solid #cfe2ff;
+	    border-left: 4px solid var(--link);
+	  }
+
+	  .run-button:focus-visible,
+	  .tab:focus-visible,
+	  .sub-tab:focus-visible,
+	  .source-tab:focus-visible,
+	  .tag-cloud-chip:focus-visible,
+	  .filter-custom-button:focus-visible,
+	  .filter-custom-actions button:focus-visible,
+	  .refetch-btn:focus-visible {
+	    outline: 3px solid color-mix(in srgb, var(--link) 42%, transparent);
+	    outline-offset: 2px;
+	  }
+
+	  @media (prefers-color-scheme: dark) {
+	    header.report-header { background: #07101e; }
+	    .category-summary,
+	    .article-summary,
+	    .trading-overview-card {
+	      background: #132945;
+	      border-color: #294b74;
+	    }
+	    .review-panel.passed { background: #102b27; }
+	    .review-panel.has-issues { background: #302816; }
+	  }
+
+	  @media (max-width: 640px) {
+	    main { padding: 0.75rem 1rem 2.5rem; }
+	    header.report-header {
+	      grid-template-columns: minmax(0, 1fr);
+	      padding: 1rem;
+	    }
+	    header.report-header .archive-link {
+	      grid-column: 1;
+	      grid-row: auto;
+	      justify-self: start;
+	      margin-top: 0.35rem;
+	    }
+	    .run-console,
+	    .filter-console { padding: 0.75rem 0.8rem; }
+	    .brief-meta { margin-bottom: 0.55rem; }
+	    .brief-meta-summary { min-height: 2.45rem; padding: 0.5rem 0.65rem; }
+	    .stream-layout { display: block; }
+	    .stream-navigation {
+	      position: sticky;
+	      top: 0;
+	      z-index: 30;
+	      margin: 0 -1rem 0.6rem;
+	      padding: 0.35rem 1rem;
+	      background: color-mix(in srgb, var(--bg) 95%, transparent);
+	      border-bottom: 1px solid var(--rule);
+	      backdrop-filter: blur(12px);
+	    }
+	    .stream-navigation::after {
+	      content: "";
+	      position: absolute;
+	      top: 0.35rem;
+	      right: 1rem;
+	      width: 2rem;
+	      height: 2rem;
+	      pointer-events: none;
+	      background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg) 96%, transparent));
+	    }
+	    .stream-navigation .tabs {
+	      display: flex;
+	      gap: 0.15rem;
+	      overflow-x: auto;
+	      padding: 0 1.5rem 0 0;
+	      background: transparent;
+	      border: 0;
+	      border-radius: 0;
+	      box-shadow: none;
+	      scrollbar-width: none;
+	    }
+	    .stream-navigation .tabs::-webkit-scrollbar { display: none; }
+	    .stream-navigation .tab { flex: 0 0 auto; width: auto; min-height: 2rem; padding: 0.38rem 0.55rem; }
+	    .reading-context { margin: 0.28rem 0 0; padding: 0.38rem 0.55rem; }
+	    .reading-context-path { display: flex; gap: 0.35rem; white-space: nowrap; overflow: hidden; }
+	    .reading-context-path span { overflow: hidden; text-overflow: ellipsis; }
+	    .reading-context-detail { margin-top: 0.2rem !important; }
+	    .reading-progress { margin-top: 0.25rem; }
+	    .update-available { margin-top: 0.28rem; padding: 0.4rem 0.55rem; }
+	    .panel.stream-section { scroll-margin-top: 6.2rem; margin-bottom: 0.75rem; padding: 0.7rem 0.72rem 0.2rem; }
+	    .sub-content,
+	    .source-content { scroll-margin-top: 6.2rem; }
+	    .stream-source-heading { top: 5.95rem; }
+	    .stream-category-heading h2 { font-size: 0.98rem; }
+	    .sub-tabs { margin: 0.45rem 0; }
+	    .source-tabs { margin: 0.35rem 0 0.45rem; }
+	    .article { margin: 0; padding-left: 0; padding-right: 0; }
+	    .article:hover { margin: 0; padding-left: 0; padding-right: 0; }
+	    .article-summary { padding: 0.45rem 0.55rem; font-size: 0.86rem; line-height: 1.55; }
+	    .article-tags { margin-top: 0.3rem; }
+	  }
+
+	  @media (prefers-reduced-motion: reduce) {
+	    html { scroll-behavior: auto; }
+	    *, *::before, *::after {
+	      animation-duration: 0.01ms !important;
+	      animation-iteration-count: 1 !important;
+	      transition-duration: 0.01ms !important;
+	    }
+	  }
 	</style>
 </head>
 <body>
@@ -2015,6 +2562,12 @@ export function renderHtml(
       ${process.env.WEB_MODE === "true" ? `<a class="archive-link" href="../archive.html">${STR.archiveLink}</a>` : ""}
   </header>
 
+  <details class="brief-meta">
+    <summary class="brief-meta-summary">
+      <span>${REPORT_LOCALE === "en" ? "About this edition" : "本期说明"}</span>
+      <span>${editionStats}</span>
+    </summary>
+    <div class="brief-meta-body">
   <section class="run-console" data-actions-url="${escapeHtml(actionsUrl)}" data-github-repository="${escapeHtml(githubRepository)}" data-run-endpoint="${escapeHtml(runEndpoint)}">
     <div class="run-console-head">
       <button class="run-button" id="runDailyButton" type="button" title="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}" aria-label="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}">▶</button>
@@ -2051,31 +2604,51 @@ export function renderHtml(
 
   ${reviewHtml(review)}
 
-  <nav class="tabs" role="tablist">
-    ${raw.trending.length > 0 ? `<button class="tab active" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
-    <button class="tab${raw.trending.length > 0 ? "" : " active"}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
-    ${trading ? `<button class="tab" data-tab="trading">${STR.catTrading}<span class="count">${trading.tickers.length}</span></button>` : ""}
-    <button class="tab" data-tab="politics">${CATEGORY_LABELS.politics}<span class="count">${counts.politics}</span></button>
-    <button class="tab" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>
-    ${techCommunitySubs.length > 0 ? `<button class="tab" data-tab="community">${STR.catCommunity}<span class="count">${counts.community}</span></button>` : ""}
-  </nav>
+    </div>
+  </details>
 
-  <section class="panel${raw.trending.length > 0 ? " active" : ""}" data-panel="trending">
+  <div class="stream-layout">
+  <aside class="stream-navigation">
+  <nav class="tabs" aria-label="${REPORT_LOCALE === "en" ? "Section navigation" : "栏目定位"}">
+    ${raw.trending.length > 0 ? `<button class="tab active" type="button" data-scroll-target="${streamAnchor("category", "trending")}" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
+    <button class="tab${raw.trending.length > 0 ? "" : " active"}" type="button" data-scroll-target="${streamAnchor("category", "tech")}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
+    ${trading ? `<button class="tab" type="button" data-scroll-target="${streamAnchor("category", "trading")}" data-tab="trading">${STR.catTrading}<span class="count">${trading.tickers.length}</span></button>` : ""}
+    <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "politics")}" data-tab="politics">${CATEGORY_LABELS.politics}<span class="count">${counts.politics}</span></button>
+    <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "finance")}" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>
+    ${techCommunitySubs.length > 0 ? `<button class="tab" type="button" data-scroll-target="${streamAnchor("category", "community")}" data-tab="community">${STR.catCommunity}<span class="count">${counts.community}</span></button>` : ""}
+  </nav>
+  <div class="reading-context" aria-live="polite">
+    <p class="reading-context-path"><span id="currentCategory">${raw.trending.length > 0 ? STR.catTrending : CATEGORY_LABELS.tech}</span><span id="currentSubcategory"></span></p>
+    <p class="reading-context-detail"><span id="currentTags">${REPORT_LOCALE === "en" ? "All topics" : "全部标签"}</span><span id="readingPosition">1 / ${Math.max(1, totalStreamItems)}</span></p>
+    <div class="reading-progress"><span id="readingProgressBar"></span></div>
+  </div>
+  <button class="update-available" id="updateAvailable" type="button" hidden>${REPORT_LOCALE === "en" ? "New edition available" : "有新内容，点击接入"}</button>
+  </aside>
+
+  <div class="stream-feed" data-total-items="${totalStreamItems}">
+  <section class="panel stream-section active" id="${streamAnchor("category", "trending")}" data-panel="trending" data-category-label="${escapeHtml(STR.catTrending)}">
+    <header class="stream-category-heading"><h2>${STR.catTrending}</h2><span>${counts.trending}</span></header>
     ${renderRawCategoryPanel("trending", raw.trending, "trending", categorySummaries)}
   </section>
-  <section class="panel${raw.trending.length > 0 ? "" : " active"}" data-panel="tech">
+  <section class="panel stream-section active" id="${streamAnchor("category", "tech")}" data-panel="tech" data-category-label="${escapeHtml(CATEGORY_LABELS.tech)}">
+    <header class="stream-category-heading"><h2>${CATEGORY_LABELS.tech}</h2><span>${counts.tech}</span></header>
     ${renderRawCategoryPanel("tech", techMainSubs, "tech", categorySummaries)}
   </section>
-  ${trading ? `<section class="panel" data-panel="trading">${renderTradingPanel(trading)}</section>` : ""}
-  <section class="panel" data-panel="politics">
+  ${trading ? `<section class="panel stream-section active" id="${streamAnchor("category", "trading")}" data-panel="trading" data-category-label="${escapeHtml(STR.catTrading)}"><header class="stream-category-heading"><h2>${STR.catTrading}</h2><span>${trading.tickers.length}</span></header>${renderTradingPanel(trading)}</section>` : ""}
+  <section class="panel stream-section active" id="${streamAnchor("category", "politics")}" data-panel="politics" data-category-label="${escapeHtml(CATEGORY_LABELS.politics)}">
+    <header class="stream-category-heading"><h2>${CATEGORY_LABELS.politics}</h2><span>${counts.politics}</span></header>
     ${renderRawCategoryPanel("politics", raw.politics, "politics", categorySummaries)}
   </section>
-  <section class="panel" data-panel="finance">
+  <section class="panel stream-section active" id="${streamAnchor("category", "finance")}" data-panel="finance" data-category-label="${escapeHtml(CATEGORY_LABELS.finance)}">
+    <header class="stream-category-heading"><h2>${CATEGORY_LABELS.finance}</h2><span>${counts.finance}</span></header>
     ${renderRawCategoryPanel("finance", raw.finance, "finance", categorySummaries)}
   </section>
-  ${techCommunitySubs.length > 0 ? `<section class="panel" data-panel="community">
+  ${techCommunitySubs.length > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "community")}" data-panel="community" data-category-label="${escapeHtml(STR.catCommunity)}"><header class="stream-category-heading"><h2>${STR.catCommunity}</h2><span>${counts.community}</span></header>
     ${renderRawCategoryPanel("tech", techCommunitySubs, "community", categorySummaries)}
   </section>` : ""}
+  <div class="stream-loader" id="streamLoader" aria-live="polite">${REPORT_LOCALE === "en" ? "Loading more" : "继续下滑，自动接入更多信息"}</div>
+  </div>
+  </div>
 
   <footer>
     ${STR.footer}
@@ -2242,70 +2815,259 @@ export function renderHtml(
     if (isPages) pollGithub(); else pollLocal();
   })();
 
-  document.querySelectorAll('.tabs > .tab').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var target = btn.dataset.tab;
-      document.querySelectorAll('.tabs > .tab').forEach(function (b) {
-        b.classList.toggle('active', b === btn);
+  (function () {
+    var batchSize = 12;
+    var articles = Array.from(document.querySelectorAll('.stream-feed .article'));
+    var sections = Array.from(document.querySelectorAll('.stream-section'));
+    var currentCategory = document.getElementById('currentCategory');
+    var currentSubcategory = document.getElementById('currentSubcategory');
+    var currentTags = document.getElementById('currentTags');
+    var readingPosition = document.getElementById('readingPosition');
+    var readingProgressBar = document.getElementById('readingProgressBar');
+    var streamLoader = document.getElementById('streamLoader');
+    var updateAvailable = document.getElementById('updateAvailable');
+    var visibleCount = Math.min(batchSize, articles.length);
+    var forcedPanelIndex = -1;
+    var ticking = false;
+    var activeCategoryId = '';
+    var navigationTargetPanel = null;
+    var navigationTargetTimer = null;
+
+    function syncDeferredContainers() {
+      document.querySelectorAll('.source-content').forEach(function (source) {
+        source.classList.toggle('stream-deferred', !source.querySelector('.article:not(.stream-pending)'));
       });
-      document.querySelectorAll('.panel').forEach(function (p) {
-        p.classList.toggle('active', p.dataset.panel === target);
+      document.querySelectorAll('.sub-content').forEach(function (sub) {
+        sub.classList.toggle('stream-deferred', !sub.querySelector('.article:not(.stream-pending)'));
       });
-    });
-  });
-  document.querySelectorAll('.sub-tab').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var panel = btn.closest('.panel');
-      if (!panel) return;
-      var sub = btn.dataset.sub;
-      panel.querySelectorAll('.sub-tab').forEach(function (b) {
-        b.classList.toggle('active', b === btn);
+      var lastArticle = articles[Math.max(0, visibleCount - 1)];
+      var lastPanel = lastArticle ? lastArticle.closest('.stream-section') : null;
+      var frontier = Math.max(forcedPanelIndex, lastPanel ? sections.indexOf(lastPanel) : -1);
+      sections.forEach(function (section, index) {
+        var hasArticles = !!section.querySelector('.article');
+        var hasVisible = !!section.querySelector('.article:not(.stream-pending)');
+        section.classList.toggle('stream-deferred', hasArticles ? !hasVisible : index > frontier);
       });
-      panel.querySelectorAll('.sub-content').forEach(function (p) {
-        p.classList.toggle('active', p.dataset.subContent === sub);
+    }
+
+    function revealThrough(count) {
+      visibleCount = Math.min(count, articles.length);
+      articles.forEach(function (article, index) {
+        var visible = index < visibleCount;
+        article.classList.toggle('stream-pending', !visible);
+        if (visible) article.classList.add('stream-revealed');
       });
-    });
-  });
-  document.querySelectorAll('.source-tab').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      // __all__ has its own dedicated handler below — skip here to avoid double-toggle
-      if (btn.dataset.source === '__all__') return;
-      var subContent = btn.closest('.sub-content');
-      if (!subContent) return;
-      var src = btn.dataset.source;
-      subContent.querySelectorAll('.source-tab').forEach(function (b) {
-        b.classList.toggle('active', b === btn);
-      });
-      subContent.querySelectorAll('.source-content').forEach(function (p) {
-        p.classList.toggle('active', p.dataset.sourceContent === src);
-      });
-    });
-  });
-  // Smart "All" button: toggles show-all mode. First click shows every
-  // source-content; second click reverts to first source only.
-  document.querySelectorAll('.source-tab[data-source="__all__"]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var subContent = btn.closest('.sub-content');
-      if (!subContent) return;
-      var wasActive = btn.classList.contains('active');
-      subContent.querySelectorAll('.source-tab').forEach(function (b) {
-        b.classList.toggle('active', b === btn ? !wasActive : false);
-      });
-      var contents = subContent.querySelectorAll('.source-content');
-      if (wasActive) {
-        // Revert to first source only
-        var firstReal = subContent.querySelector('.source-tab:not([data-source="__all__"])');
-        var firstSrc = firstReal ? firstReal.dataset.source : null;
-        contents.forEach(function (p) {
-          p.classList.toggle('active', p.dataset.sourceContent === firstSrc);
-        });
-        if (firstReal) firstReal.classList.add('active');
-      } else {
-        // Show all
-        contents.forEach(function (p) { p.classList.add('active'); });
+      syncDeferredContainers();
+      if (streamLoader) {
+        streamLoader.textContent = visibleCount >= articles.length
+          ? '${REPORT_LOCALE === "en" ? "All items loaded" : "已接入本期全部信息"}'
+          : '${REPORT_LOCALE === "en" ? "Keep scrolling to load more" : "继续下滑，自动接入更多信息"}';
       }
+    }
+
+    function topOffset() {
+      return window.innerWidth <= 640 ? 112 : 24;
+    }
+
+    function scrollToTarget(id) {
+      var target = document.getElementById(id);
+      if (!target) return;
+      var targetPanel = target.classList.contains('stream-section') ? target : target.closest('.stream-section');
+      if (targetPanel) {
+        forcedPanelIndex = Math.max(forcedPanelIndex, sections.indexOf(targetPanel));
+        navigationTargetPanel = targetPanel;
+        if (navigationTargetTimer) clearTimeout(navigationTargetTimer);
+        navigationTargetTimer = setTimeout(function () { navigationTargetPanel = null; }, 1200);
+      }
+      var targetArticle = target.querySelector('.article');
+      if (targetArticle) {
+        var index = articles.indexOf(targetArticle);
+        if (index >= visibleCount) revealThrough(index + batchSize);
+      } else {
+        syncDeferredContainers();
+      }
+      var top = target.getBoundingClientRect().top + window.scrollY - topOffset();
+      window.scrollTo({ top: top, behavior: 'smooth' });
+      try { history.replaceState(null, '', '#' + id); } catch (_) {}
+    }
+
+    document.addEventListener('dailybrief:reveal-article', function (event) {
+      var target = event.detail && event.detail.article;
+      var index = articles.indexOf(target);
+      if (index < 0) return;
+      var targetPanel = target.closest('.stream-section');
+      if (targetPanel) forcedPanelIndex = Math.max(forcedPanelIndex, sections.indexOf(targetPanel));
+      if (index >= visibleCount) revealThrough(index + batchSize);
+      window.setTimeout(function () {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        updateReadingContext();
+      }, 0);
     });
-  });
+
+    document.querySelectorAll('[data-scroll-target]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        scrollToTarget(button.dataset.scrollTarget || '');
+      });
+    });
+
+    function currentVisibleSection() {
+      var line = topOffset() + Math.min(180, window.innerHeight * 0.28);
+      var visibleSections = sections.filter(function (section) { return !section.classList.contains('stream-deferred'); });
+      if (visibleSections.length && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2) {
+        if (navigationTargetPanel && visibleSections.indexOf(navigationTargetPanel) >= 0) return navigationTargetPanel;
+        return visibleSections[visibleSections.length - 1];
+      }
+      var current = visibleSections[0] || null;
+      visibleSections.forEach(function (section) {
+        if (section.getBoundingClientRect().top <= line) current = section;
+      });
+      return current;
+    }
+
+    function currentVisibleArticle(section) {
+      if (!section) return null;
+      var line = topOffset() + Math.min(180, window.innerHeight * 0.28);
+      var visibleArticles = Array.from(section.querySelectorAll('.article:not(.stream-pending)'));
+      var current = visibleArticles[0] || null;
+      visibleArticles.forEach(function (article) {
+        if (article.getBoundingClientRect().top <= line) current = article;
+      });
+      return current;
+    }
+
+    function updateReadingContext() {
+      ticking = false;
+      if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 720 && visibleCount < articles.length) {
+        revealThrough(visibleCount + batchSize);
+      }
+      var section = currentVisibleSection();
+      if (!section) return;
+      var article = currentVisibleArticle(section);
+      var sub = article ? article.closest('.sub-content') : null;
+      var source = article ? article.closest('.source-content') : null;
+      var index = article ? articles.indexOf(article) : -1;
+      var progress = articles.length && index >= 0
+        ? ((index + 1) / articles.length) * 100
+        : ((sections.indexOf(section) + 1) / Math.max(1, sections.length)) * 100;
+      var categoryLabel = section ? section.dataset.categoryLabel || '' : '';
+      var subLabel = sub ? sub.dataset.subLabel || '' : '';
+      var sourceLabel = source ? source.dataset.sourceLabel || '' : '';
+      var tags = article ? (article.dataset.tags || '').split(',').filter(Boolean).slice(0, 2) : [];
+      if (currentCategory) currentCategory.textContent = categoryLabel;
+      if (currentSubcategory) currentSubcategory.textContent = [subLabel, sourceLabel].filter(Boolean).join(' · ');
+      if (currentTags) currentTags.textContent = tags.length ? tags.join(' · ') : '${REPORT_LOCALE === "en" ? "Unlabeled" : "未标标签"}';
+      if (readingPosition) readingPosition.textContent = index >= 0
+        ? (index + 1) + ' / ' + articles.length
+        : '${REPORT_LOCALE === "en" ? "Live overview" : "实时概览"}';
+      if (readingProgressBar) readingProgressBar.style.width = progress.toFixed(2) + '%';
+      document.querySelectorAll('.tabs > .tab').forEach(function (button) {
+        button.classList.toggle('active', !!section && button.dataset.tab === section.dataset.panel);
+      });
+      var categoryId = section ? section.dataset.panel || '' : '';
+      if (categoryId && categoryId !== activeCategoryId) {
+        activeCategoryId = categoryId;
+        var activeCategoryTab = document.querySelector('.tabs > .tab[data-tab="' + categoryId + '"]');
+        if (activeCategoryTab && window.innerWidth <= 640) {
+          var tabStrip = activeCategoryTab.parentElement;
+          if (tabStrip) {
+            var centeredLeft = activeCategoryTab.offsetLeft - (tabStrip.clientWidth - activeCategoryTab.offsetWidth) / 2;
+            tabStrip.scrollTo({ left: Math.max(0, centeredLeft), behavior: 'smooth' });
+          }
+        }
+      }
+      document.querySelectorAll('.sub-tab').forEach(function (button) {
+        button.classList.toggle('active', !!sub && button.dataset.sub === sub.dataset.subContent && button.dataset.cat === sub.dataset.cat);
+      });
+      document.querySelectorAll('.source-tab').forEach(function (button) {
+        var active = !!source && button.dataset.source === source.dataset.sourceContent && button.dataset.sub === source.dataset.sub;
+        button.classList.toggle('active', active || (!!sub && button.dataset.source === '__all__' && !sourceLabel));
+      });
+      try {
+        localStorage.setItem('dailybrief.reading.${date}', JSON.stringify({ url: article ? article.dataset.articleUrl || '' : '', index: Math.max(0, index), scrollY: window.scrollY }));
+      } catch (_) {}
+    }
+
+    function requestReadingUpdate() {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(updateReadingContext);
+    }
+
+    function afterPageLoad(callback) {
+      var run = function () { window.setTimeout(callback, 0); };
+      if (document.readyState === 'complete') run();
+      else window.addEventListener('load', run, { once: true });
+    }
+
+    function restoreReadingPosition() {
+      try {
+        var reloadAnchor = sessionStorage.getItem('dailybrief.reloadAnchor') || '';
+        sessionStorage.removeItem('dailybrief.reloadAnchor');
+        var reloadMatch = articles.find(function (article) { return reloadAnchor && article.dataset.articleUrl === reloadAnchor; });
+        if (reloadMatch) {
+          var reloadIndex = articles.indexOf(reloadMatch);
+          revealThrough(reloadIndex + batchSize);
+          afterPageLoad(function () {
+            reloadMatch.scrollIntoView({ block: 'center' });
+            updateReadingContext();
+          });
+          return;
+        }
+      } catch (_) {}
+      if (location.hash && document.getElementById(location.hash.slice(1))) {
+        afterPageLoad(function () { scrollToTarget(location.hash.slice(1)); });
+        return;
+      }
+      try {
+        var saved = JSON.parse(localStorage.getItem('dailybrief.reading.${date}') || 'null');
+        if (!saved) return;
+        var matched = articles.find(function (article) { return saved.url && article.dataset.articleUrl === saved.url; });
+        var index = matched ? articles.indexOf(matched) : Math.max(0, Number(saved.index) || 0);
+        revealThrough(index + batchSize);
+        afterPageLoad(function () {
+          if (matched) matched.scrollIntoView({ block: 'center' });
+          else if (Number.isFinite(saved.scrollY)) window.scrollTo(0, saved.scrollY);
+          updateReadingContext();
+        });
+      } catch (_) {}
+    }
+
+    function checkForNewEdition() {
+      if (!updateAvailable || location.protocol === 'file:') return;
+      var refreshUrl;
+      try {
+        refreshUrl = new URL(location.href);
+        refreshUrl.hash = '';
+        refreshUrl.searchParams.set('edition', String(Date.now()));
+      } catch (_) {
+        return;
+      }
+      fetch(refreshUrl.toString(), { method: 'GET', cache: 'no-store' })
+        .then(function (response) { return response.ok ? response.text() : ''; })
+        .then(function (html) {
+          if (!html) return;
+          var match = html.match(/<meta name="dailybrief-generated-at" content="([^"]*)">/i);
+          var current = document.querySelector('meta[name="dailybrief-generated-at"]');
+          if (match && current && match[1] && match[1] !== current.getAttribute('content')) updateAvailable.hidden = false;
+        })
+        .catch(function () {});
+    }
+
+    if (updateAvailable) {
+      updateAvailable.addEventListener('click', function () {
+        var article = currentVisibleArticle(currentVisibleSection());
+        try { sessionStorage.setItem('dailybrief.reloadAnchor', article ? article.dataset.articleUrl || '' : ''); } catch (_) {}
+        location.reload();
+      });
+    }
+
+    revealThrough(visibleCount);
+    restoreReadingPosition();
+    updateReadingContext();
+    window.addEventListener('scroll', requestReadingUpdate, { passive: true });
+    window.addEventListener('resize', requestReadingUpdate);
+    window.setInterval(checkForNewEdition, 180000);
+  })();
   document.querySelectorAll('.trading-group-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var grp = btn.dataset.group;
@@ -2365,7 +3127,7 @@ export function renderHtml(
       });
       // Scroll to the first highlighted article in the active panel
       var first = document.querySelector('.article.tag-highlight');
-      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (first) document.dispatchEvent(new CustomEvent('dailybrief:reveal-article', { detail: { article: first } }));
     });
   });
   // Failed source refetch buttons
