@@ -121,6 +121,10 @@ test("public review output exposes target evidence fields without operator contr
   await expect(page.locator("#runDailyButton")).toHaveCount(0);
   await expect(page.locator("#filterConsole")).toHaveCount(0);
   await expect(page.locator(".failed-sources")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "前往 GitHub Actions 手动运行" })).toHaveAttribute(
+    "href",
+    "https://github.com/gtbwpkwjnb-alt/DailyBrief/actions/workflows/daily.yml",
+  );
   await expect(page.locator(".article-priority")).toContainText("P1");
   await expect(page.locator(".article-legacy-score")).toHaveCount(0);
   await expect(page.locator(".article-public-context")).toContainText("公共影响高");
@@ -131,7 +135,10 @@ test("public review output exposes target evidence fields without operator contr
   await expect(page.locator(".article")).toHaveAttribute("data-item-id", "review-item");
   await expect(page.locator(".article")).toHaveAttribute("data-story-id", "review-story");
   await expect(page.locator(".article")).toHaveAttribute("data-stable-order", "1");
-  await expect(page.locator(".public-disclosure-actions a")).toHaveAttribute("href", /github\.com\/gtbwpkwjnb-alt\/DailyBrief\/issues\/new/);
+  await expect(page.getByRole("link", { name: "反馈本期简报" })).toHaveAttribute(
+    "href",
+    /github\.com\/gtbwpkwjnb-alt\/DailyBrief\/issues\/new/,
+  );
   expect(pageErrors).toEqual([]);
 });
 

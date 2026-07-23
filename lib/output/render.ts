@@ -104,6 +104,7 @@ const TEXTS_ZH = {
   generatedAt: "生成时间",
   selectionPrinciples: "查看筛选原则",
   feedbackEdition: "反馈本期简报",
+  runWorkflow: "前往 GitHub Actions 手动运行",
   rolePrimary: "主来源",
   roleOfficial: "官方声明",
   roleCorroboration: "独立佐证",
@@ -185,6 +186,7 @@ const TEXTS_EN: typeof TEXTS_ZH = {
   generatedAt: "Generated at",
   selectionPrinciples: "View selection principles",
   feedbackEdition: "Send edition feedback",
+  runWorkflow: "Run manually in GitHub Actions",
   rolePrimary: "Primary",
   roleOfficial: "Official statement",
   roleCorroboration: "Independent corroboration",
@@ -1028,6 +1030,7 @@ export function renderHtml(
     </dl>
     <div class="public-disclosure-actions">
       <details><summary>${STR.selectionPrinciples}</summary><p>${escapeHtml(filterText.rules)}${filterText.keywords ? ` · ${escapeHtml(filterText.keywords)}` : ""}</p></details>
+      ${isPublicReader && actionsUrl ? `<a href="${escapeHtml(actionsUrl)}" target="_blank" rel="noopener noreferrer">${STR.runWorkflow}</a>` : ""}
       ${feedbackUrl ? `<a href="${escapeHtml(feedbackUrl)}" target="_blank" rel="noopener noreferrer">${STR.feedbackEdition}</a>` : ""}
     </div>
   </section>`;
