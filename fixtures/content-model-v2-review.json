@@ -1,0 +1,156 @@
+{
+  "review_only": true,
+  "brief_id": "review-brief-2026-07-23",
+  "brief_variant_id": "evidence_first-public-review-v1",
+  "snapshot_id": "review-snapshot-v2-2026-07-23-r2",
+  "rule_set_name": "evidence_first",
+  "rule_set_version": "evidence-first-review-v1.4-r2",
+  "generated_at": "2026-07-23T08:00:00.000+08:00",
+  "revision_notice": "评审样本修订 2：补齐来源家族、时间语义和完整公开字段。",
+  "items": [
+    {
+      "item_id": "review-item-01",
+      "story_id": "review-story-01",
+      "stable_order": 3,
+      "category": "politics",
+      "subcategory": "world",
+      "display_title": "多源报道确认公共服务规则调整",
+      "original_title": "Review fixture: public service policy update",
+      "priority_level": "P1",
+      "reason_codes": ["HIGH_PUBLIC_IMPACT", "MULTI_SOURCE_CONFIRMED"],
+      "evidence_state": "multi_source_confirmed",
+      "evidence_note": "两个独立来源家族对核心变化描述一致，具体实施细节仍以正式文件为准。",
+      "summary_short": "两家独立来源报道公共服务规则调整，实施细节仍待正式文件确认。",
+      "summary_expanded": "评审样本：本条用于确认 P1、多源证据、入选原因和来源角色在卡片中的信息层级，不代表真实新闻。",
+      "uncertainties": ["实施细节尚未由正式文件逐项确认"],
+      "tags": ["公共服务", "规则调整", "评审样本"],
+      "primary_source_ref_id": "bbc-world",
+      "source_refs": [
+        {
+          "source_id": "bbc-world",
+          "publisher": "BBC World",
+          "canonical_url": "https://example.com/review/policy-primary",
+          "original_title": "Public service policy update announced",
+          "published_at": "2026-07-23T06:00:00.000+08:00",
+          "fetched_at": "2026-07-23T06:35:00.000+08:00",
+          "role": "primary_report",
+          "origin_family_id": "review-family-bbc-original",
+          "family_basis": "independent_report",
+          "assignment_confidence": 0.98
+        },
+        {
+          "source_id": "ap-world",
+          "publisher": "AP News",
+          "canonical_url": "https://example.com/review/policy-corroboration",
+          "original_title": "Independent report confirms policy update",
+          "published_at": "2026-07-23T06:20:00.000+08:00",
+          "fetched_at": "2026-07-23T06:40:00.000+08:00",
+          "role": "independent_corroboration",
+          "origin_family_id": "review-family-ap-original",
+          "family_basis": "independent_report",
+          "assignment_confidence": 0.97
+        }
+      ],
+      "revision": 2
+    },
+    {
+      "item_id": "review-item-02",
+      "story_id": "review-story-02",
+      "stable_order": 2,
+      "category": "tech",
+      "subcategory": "github-trending",
+      "display_title": "开源项目发布新的本地推理工具",
+      "original_title": "Review fixture: local inference toolkit released",
+      "priority_level": "P2",
+      "reason_codes": ["ORIGINAL_SOURCE", "DIVERSITY_GAIN"],
+      "evidence_state": "single_named_source",
+      "evidence_note": "当前只有项目原始页面，功能和性能描述尚无独立复核。",
+      "summary_short": "项目原始页面宣布本地推理工具，性能结论尚无独立复核。",
+      "summary_expanded": "评审样本：本条演示单一具名来源和 P2 信息的展示方式，同时保留对性能结论的证据边界。",
+      "uncertainties": ["性能数据尚未获得独立复现"],
+      "tags": ["开源", "本地推理", "开发工具"],
+      "primary_source_ref_id": "github-trending",
+      "source_refs": [
+        {
+          "source_id": "github-trending",
+          "publisher": "GitHub Trending",
+          "canonical_url": "https://example.com/review/open-source-tool",
+          "original_title": "Local inference toolkit",
+          "published_at": "2026-07-23T05:30:00.000+08:00",
+          "fetched_at": "2026-07-23T05:42:00.000+08:00",
+          "role": "primary_report",
+          "origin_family_id": "review-family-project-original",
+          "family_basis": "official_statement",
+          "assignment_confidence": 1
+        }
+      ],
+      "revision": 2
+    },
+    {
+      "item_id": "review-item-03",
+      "story_id": "review-story-03",
+      "stable_order": 1,
+      "category": "trending",
+      "subcategory": "google-trends",
+      "display_title": "某关键词搜索关注度快速上升",
+      "original_title": "Review fixture: search attention signal",
+      "priority_level": "P3",
+      "reason_codes": ["FAST_RISING_ATTENTION", "DEVELOPING_SIGNAL"],
+      "evidence_state": "developing",
+      "evidence_note": "热度只证明搜索关注发生变化，不能据此断言相关事件已经发生。",
+      "summary_short": "搜索关注度快速上升；当前只能确认热度变化，不能确认关联事件。",
+      "summary_expanded": null,
+      "uncertainties": ["热度变化的原因未知", "关联事件未获独立来源确认"],
+      "tags": ["关注度", "热搜", "发展中"],
+      "primary_source_ref_id": "google-trends-us",
+      "source_refs": [
+        {
+          "source_id": "google-trends-us",
+          "publisher": "Google Trends",
+          "canonical_url": "https://example.com/review/search-signal",
+          "original_title": "Search attention signal",
+          "published_at": "2026-07-23T07:10:00.000+08:00",
+          "fetched_at": "2026-07-23T07:15:00.000+08:00",
+          "role": "community_signal",
+          "origin_family_id": "review-family-google-trends-signal",
+          "family_basis": "community_origin",
+          "assignment_confidence": 1
+        }
+      ],
+      "revision": 2
+    },
+    {
+      "item_id": "review-item-04",
+      "story_id": "review-story-04",
+      "stable_order": 4,
+      "category": "tech",
+      "subcategory": "cn-community",
+      "display_title": "待核验：社区流传的高风险说法",
+      "original_title": "Review fixture: unsupported high-risk claim",
+      "priority_level": "P4",
+      "reason_codes": ["DEVELOPING_SIGNAL"],
+      "evidence_state": "unverified",
+      "evidence_note": "输入没有提供足够证据，评审版只保留线索，不生成确定性事实摘要。",
+      "summary_short": "社区出现一项高风险说法，目前证据不足，仅保留为待核验线索。",
+      "summary_expanded": null,
+      "uncertainties": ["事件是否发生未知", "原始证据与独立来源均缺失"],
+      "tags": ["待核验", "社区信号", "高风险"],
+      "primary_source_ref_id": "v2ex-hot",
+      "source_refs": [
+        {
+          "source_id": "v2ex-hot",
+          "publisher": "V2EX",
+          "canonical_url": "https://example.com/review/unverified-claim",
+          "original_title": "Unsupported claim under review",
+          "published_at": null,
+          "fetched_at": "2026-07-23T07:30:00.000+08:00",
+          "role": "community_signal",
+          "origin_family_id": "review-family-v2ex-thread",
+          "family_basis": "community_origin",
+          "assignment_confidence": 0.9
+        }
+      ],
+      "revision": 2
+    }
+  ]
+}

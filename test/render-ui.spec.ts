@@ -34,7 +34,8 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   await expect(page.locator("a[href^='javascript:']")).toHaveCount(0);
   await expect(page.locator(".article-title")).toContainText(article.displayTitle!);
   await expect(page.locator(".article-excerpt")).toHaveCount(0);
-  await expect(page.locator(".article-importance")).toContainText("8/10");
+  await expect(page.locator(".article-legacy-score")).toContainText("旧模型评分 8/10");
+  await expect(page.locator(".article-public-context")).toHaveCount(0);
   await expect(page.locator(".brief-meta-summary")).toBeVisible();
   await expect(page.locator(".brief-meta-summary")).toContainText("1 个来源");
   await expect(page.locator(".brief-meta-summary")).not.toContainText("0 个来源");
@@ -42,6 +43,96 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   await expect(page.locator("#runDailyButton")).toBeVisible();
   expect(pageErrors).toEqual([]);
   expect((await page.screenshot()).byteLength).toBeGreaterThan(1_000);
+});
+
+test("public review output exposes target evidence fields without operator controls", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const article: ArticleInput = {
+    sourceId: "bbc-world",
+    source: "BBC World",
+    title: "Public contract review fixture",
+    displayTitle: "目标公开契约评审样本",
+    url: "https://example.com/review/primary",
+    category: "politics",
+    summary: "这是一条用于验证公开优先级、证据状态、入选原因和多来源列表的评审样本。",
+    itemId: "review-item",
+    storyId: "review-story",
+    stableOrder: 1,
+    priorityLevel: "P1",
+    reasonCodes: ["HIGH_PUBLIC_IMPACT", "MULTI_SOURCE_CONFIRMED"],
+    evidenceState: "multi_source_confirmed",
+    evidenceNote: "两个独立来源对核心事实描述一致。",
+    uncertainties: ["实施细节仍待正式文件确认"],
+    sourceRefs: [
+      {
+        sourceId: "bbc-world",
+        publisher: "BBC World",
+        canonicalUrl: "https://example.com/review/primary",
+        originalTitle: "Primary report",
+        fetchedAt: new Date("2026-07-23T06:10:00.000Z"),
+        role: "primary_report",
+        originFamilyId: "family-primary",
+        familyBasis: "independent_report",
+        assignmentConfidence: 1,
+      },
+      {
+        sourceId: "ap-world",
+        publisher: "AP News",
+        canonicalUrl: "https://example.com/review/corroboration",
+        originalTitle: "Independent corroboration",
+        fetchedAt: new Date("2026-07-23T06:20:00.000Z"),
+        role: "independent_corroboration",
+        originFamilyId: "family-corroboration",
+        familyBasis: "independent_report",
+        assignmentConfidence: 1,
+      },
+    ],
+    revision: 2,
+  };
+  const previousWebMode = process.env.WEB_MODE;
+  const previousRepository = process.env.GITHUB_REPOSITORY;
+  process.env.WEB_MODE = "true";
+  process.env.GITHUB_REPOSITORY = "gtbwpkwjnb-alt/DailyBrief";
+  const html = renderHtml(
+    report,
+    groupRaw([article], sources),
+    "2026-07-23",
+    [{ id: "internal", name: "Internal failure", reason: "must stay private" }],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      ruleSetName: "evidence_first",
+      ruleSetVersion: "evidence-first-review-v1.4-r2",
+      revisionNotice: "Review revision 2",
+    },
+  );
+  if (previousWebMode === undefined) delete process.env.WEB_MODE;
+  else process.env.WEB_MODE = previousWebMode;
+  if (previousRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+  else process.env.GITHUB_REPOSITORY = previousRepository;
+
+  await page.setContent(html);
+  await expect(page.locator(".brief-meta")).toHaveAttribute("open", "");
+  await expect(page.locator(".public-disclosure")).toContainText("evidence_first");
+  await expect(page.locator(".public-disclosure")).toContainText("Review revision 2");
+  await expect(page.locator("#runDailyButton")).toHaveCount(0);
+  await expect(page.locator("#filterConsole")).toHaveCount(0);
+  await expect(page.locator(".failed-sources")).toHaveCount(0);
+  await expect(page.locator(".article-priority")).toContainText("P1");
+  await expect(page.locator(".article-legacy-score")).toHaveCount(0);
+  await expect(page.locator(".article-public-context")).toContainText("公共影响高");
+  await expect(page.locator(".article-public-context")).toContainText("实施细节仍待正式文件确认");
+  await expect(page.locator(".evidence-multi_source_confirmed")).toContainText("多源确认");
+  await expect(page.locator(".article-source-list a")).toHaveCount(2);
+  await expect(page.locator(".article-revision")).toContainText("修订 2");
+  await expect(page.locator(".article")).toHaveAttribute("data-item-id", "review-item");
+  await expect(page.locator(".article")).toHaveAttribute("data-story-id", "review-story");
+  await expect(page.locator(".article")).toHaveAttribute("data-stable-order", "1");
+  await expect(page.locator(".public-disclosure-actions a")).toHaveAttribute("href", /github\.com\/gtbwpkwjnb-alt\/DailyBrief\/issues\/new/);
+  expect(pageErrors).toEqual([]);
 });
 
 test("world cards show publisher attribution and the incremental filter control", async ({ page }) => {

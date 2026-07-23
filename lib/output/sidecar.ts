@@ -3,6 +3,43 @@ import type { ArticleInput } from "../ai/pipeline";
 import type { FilterProfile, RunStats } from "./render";
 
 const categorySchema = z.enum(["trending", "tech", "finance", "politics"]);
+const priorityLevelSchema = z.enum(["P0", "P1", "P2", "P3", "P4"]);
+const evidenceStateSchema = z.enum([
+  "multi_source_confirmed",
+  "single_named_source",
+  "developing",
+  "unverified",
+]);
+const sourceRoleSchema = z.enum([
+  "primary_report",
+  "official_statement",
+  "independent_corroboration",
+  "analysis",
+  "community_signal",
+  "reprint",
+]);
+const sourceFamilyBasisSchema = z.enum([
+  "wire",
+  "reprint",
+  "shared_primary",
+  "independent_report",
+  "official_statement",
+  "community_origin",
+  "unknown",
+]);
+
+const sourceRefSchema = z.object({
+  sourceId: z.string().min(1),
+  publisher: z.string().min(1),
+  canonicalUrl: z.url(),
+  originalTitle: z.string().min(1),
+  publishedAt: z.string().datetime().nullable().optional(),
+  fetchedAt: z.string().datetime().optional(),
+  role: sourceRoleSchema,
+  originFamilyId: z.string().min(1).optional(),
+  familyBasis: sourceFamilyBasisSchema.optional(),
+  assignmentConfidence: z.number().min(0).max(1).optional(),
+});
 
 const articleSchema = z.object({
   sourceId: z.string().min(1),
@@ -20,6 +57,20 @@ const articleSchema = z.object({
   importance: z.number().min(1).max(10).optional(),
   meta: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  itemId: z.string().min(1).optional(),
+  storyId: z.string().min(1).optional(),
+  stableOrder: z.number().int().positive().optional(),
+  subcategory: z.string().min(1).optional(),
+  summaryShort: z.string().min(1).optional(),
+  summaryExpanded: z.string().min(1).optional(),
+  uncertainties: z.array(z.string().min(1)).max(8).optional(),
+  primarySourceRefId: z.string().min(1).optional(),
+  priorityLevel: priorityLevelSchema.optional(),
+  reasonCodes: z.array(z.string().min(1)).max(8).optional(),
+  evidenceState: evidenceStateSchema.optional(),
+  evidenceNote: z.string().min(1).optional(),
+  sourceRefs: z.array(sourceRefSchema).min(1).optional(),
+  revision: z.number().int().nonnegative().optional(),
 });
 
 const failedSourceSchema = z.object({
@@ -67,6 +118,11 @@ export function parseReportSidecar(value: unknown): ReportSidecar {
     articles: parsed.articles.map((article) => ({
       ...article,
       publishedAt: article.publishedAt ? new Date(article.publishedAt) : undefined,
+      sourceRefs: article.sourceRefs?.map((source) => ({
+        ...source,
+        publishedAt: source.publishedAt ? new Date(source.publishedAt) : undefined,
+        fetchedAt: source.fetchedAt ? new Date(source.fetchedAt) : undefined,
+      })),
     })),
   };
 }

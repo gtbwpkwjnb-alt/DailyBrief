@@ -86,9 +86,29 @@ test("report sidecar validates data and restores publication timestamps", () => 
       url: "https://example.com/a",
       category: "tech",
       publishedAt: "2026-07-10T08:00:00.000Z",
+      priorityLevel: "P1",
+      reasonCodes: ["MULTI_SOURCE_CONFIRMED"],
+      evidenceState: "multi_source_confirmed",
+      evidenceNote: "Two independent sources agree.",
+      sourceRefs: [{
+        sourceId: "example",
+        publisher: "Example",
+        canonicalUrl: "https://example.com/a",
+        originalTitle: "Title",
+        publishedAt: null,
+        fetchedAt: "2026-07-10T08:05:00.000Z",
+        role: "primary_report",
+        originFamilyId: "example-original",
+        familyBasis: "independent_report",
+        assignmentConfidence: 0.95,
+      }],
+      revision: 1,
     }],
   });
   assert.ok(sidecar.articles[0].publishedAt instanceof Date);
+  assert.equal(sidecar.articles[0].sourceRefs?.[0]?.publishedAt, undefined);
+  assert.ok(sidecar.articles[0].sourceRefs?.[0]?.fetchedAt instanceof Date);
+  assert.equal(sidecar.articles[0].priorityLevel, "P1");
   assert.throws(() => parseReportSidecar({ date: "invalid", articles: [] }));
 });
 
