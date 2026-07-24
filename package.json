@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dry-run": "tsx scripts/dry-run.ts",
+    "backtest:freshness": "tsx scripts/backtest-freshness.ts",
     "daily": "tsx scripts/daily.ts",
     "render": "tsx scripts/render.ts",
+    "render:review": "tsx scripts/render-review-v2.ts",
     "regen-trading": "tsx scripts/regen-trading.ts",
     "regen-enrich": "tsx scripts/regen-enrich.ts",
     "quota-report": "tsx scripts/quota-report.ts",

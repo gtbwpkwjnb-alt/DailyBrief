@@ -55,6 +55,7 @@ sources.config.json   # SINGLE SOURCE OF TRUTH for the source registry
 |---|---|---|
 | Full pipeline | `npm run daily` | ~5-8 min, ~6 LLM calls |
 | Fetch-only sanity check | `npm run dry-run` | ~30s, no LLM |
+| Freshness regression replay | `npm run backtest:freshness -- <articles.json> [report.json]` | ~1s, no network/LLM |
 | Re-render from cache | `npm run render [date]` | <1s |
 | Re-run trading section | `npm run regen-trading [date]` | ~2 min, 1 LLM call |
 | Top up missing summaries | `npm run regen-enrich <cat:sub> [date]` | ~30s, 1 LLM call |
@@ -71,7 +72,7 @@ Every run writes `logs/daily-<date>.log` and `source-health.json` before the sou
 
 ## Adding a source
 
-1. Edit `sources.config.json` — append an entry. Fields: `id` (unique), `name`, `type` (`rss`/`api`/`scrape`/`reader`), `url`, `category` (`tech`/`finance`/`politics`), optional `provider`, `providerSourceId`, `tier`, `subcategory`, `enabled`, `useCurl`, `lang`, `locales`, `notes`, `originCountry`. `politics` sources require `originCountry` so publisher geography is not confused with story geography. `reader` requires `provider=freshrss|miniflux`.
+1. Edit `sources.config.json` — append an entry. Fields: `id` (unique), `name`, `type` (`rss`/`api`/`scrape`/`reader`), `url`, `category` (`tech`/`finance`/`politics`), optional `provider`, `providerSourceId`, `tier`, `subcategory`, `enabled`, `useCurl`, `lang`, `locales`, `notes`, `originCountry`, `freshnessMode`, `maxAgeHours`. `politics` sources require `originCountry` so publisher geography is not confused with story geography. `reader` requires `provider=freshrss|miniflux`. Only current rankings that are freshly collected on every run may use `freshnessMode=live_snapshot`; ordinary sources must provide `publishedAt`.
 2. For non-RSS types: add a fetcher in `lib/sources/<id>.ts` exporting `fetchXxx(sourceId)` returning `RawArticle[]`, then add a branch in `lib/sources/dispatch.ts`.
 3. Run `npm run sources:check` to validate the JSON, then `npm run dry-run` to verify the fetch.
 

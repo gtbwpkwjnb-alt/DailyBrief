@@ -2,6 +2,42 @@ export type Category = "trending" | "tech" | "finance" | "politics";
 export type SourceType = "rss" | "api" | "scrape" | "reader";
 export type SourceProvider = "direct" | "freshrss" | "miniflux";
 export type SourceTier = "core" | "standard" | "supplement";
+export type SourceFreshnessMode = "published_at" | "live_snapshot";
+export type PublicPriorityLevel = "P0" | "P1" | "P2" | "P3" | "P4";
+export type PublicEvidenceState =
+  | "multi_source_confirmed"
+  | "single_named_source"
+  | "developing"
+  | "unverified";
+export type PublicSourceRole =
+  | "primary_report"
+  | "official_statement"
+  | "independent_corroboration"
+  | "analysis"
+  | "community_signal"
+  | "reprint";
+export type SourceFamilyBasis =
+  | "wire"
+  | "reprint"
+  | "shared_primary"
+  | "independent_report"
+  | "official_statement"
+  | "community_origin"
+  | "unknown";
+
+export interface PublicSourceRef {
+  sourceId: string;
+  publisher: string;
+  canonicalUrl: string;
+  originalTitle: string;
+  publishedAt?: Date;
+  fetchedAt?: Date;
+  role: PublicSourceRole;
+  /** Internal review metadata; omitted from the public JSON contract. */
+  originFamilyId?: string;
+  familyBasis?: SourceFamilyBasis;
+  assignmentConfidence?: number;
+}
 
 export interface SourceDef {
   id: string;
@@ -68,6 +104,10 @@ export interface SourceDef {
    * Default: 3 for most sources, 5 for top-tier sources, 1 for disabled.
    */
   priority?: number;
+  /** How freshness is established. Defaults to a required publishedAt. */
+  freshnessMode?: SourceFreshnessMode;
+  /** Optional per-source override for the global REPORT_FRESHNESS_HOURS. */
+  maxAgeHours?: number;
 }
 
 export interface RawArticle {
@@ -107,4 +147,19 @@ export interface RawArticle {
    * Tags enable retrieval, linking, and cross-referencing in Obsidian KB.
    */
   tags?: string[];
+  /** Target public contract fields used by the v2 content-model review. */
+  itemId?: string;
+  storyId?: string;
+  stableOrder?: number;
+  subcategory?: string;
+  summaryShort?: string;
+  summaryExpanded?: string;
+  uncertainties?: string[];
+  primarySourceRefId?: string;
+  priorityLevel?: PublicPriorityLevel;
+  reasonCodes?: string[];
+  evidenceState?: PublicEvidenceState;
+  evidenceNote?: string;
+  sourceRefs?: PublicSourceRef[];
+  revision?: number;
 }

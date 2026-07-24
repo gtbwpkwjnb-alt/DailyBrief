@@ -115,6 +115,8 @@
    - `REPORT_TZ` —— IANA 时区名（默认 UTC），例 `Asia/Shanghai` / `America/Los_Angeles`。**同时影响触发时间和日期标签**
    - `REPORT_HOUR` —— 触发的小时（基于 `REPORT_TZ`），默认 `8`（早 8 点）。逗号分隔可多次触发，如 `8,18` = 早 8 + 晚 6
    - `REPORT_DAYS` —— 触发的星期（cron 风格，`0`=周日 ... `6`=周六），默认 `*`（每天）。例 `1-5` = 工作日；`1,3,5` = 周一三五
+   - `REPORT_FRESHNESS_HOURS` —— 带发布时间内容的滚动新鲜度窗口，默认 `72` 小时；普通源缺少发布时间时不进入日报
+   - `MIN_FRESH_ARTICLES` —— 新鲜内容发布门禁，默认至少 `20` 条，否则本次生成失败且不覆盖线上日报
    - `FRESHRSS_API_URL` / `MINIFLUX_API_URL` —— 统一阅读器 API 地址。对应 token 必须放在 Secrets：`FRESHRSS_API_TOKEN` / `MINIFLUX_API_TOKEN`
    - `READER_FETCH_LIMIT` —— 每个阅读器栏目获取文章上限，默认 `30`
 6. **Actions 标签 → 选 "Daily Brief" workflow → Run workflow** 手动触发一次
@@ -673,6 +675,8 @@ The registry currently contains 83 sources, with 61 enabled by default. After lo
    - `REPORT_TZ` — IANA timezone name (default UTC); e.g. `Asia/Shanghai` / `America/Los_Angeles`. **Drives both the trigger time and the date label.**
    - `REPORT_HOUR` — hour(s) to fire in `REPORT_TZ`, default `8` (08:00). Comma-separated for multiple, e.g. `8,18` = 8 AM and 6 PM
    - `REPORT_DAYS` — day-of-week filter (cron-style, `0`=Sunday ... `6`=Saturday), default `*` (every day). E.g. `1-5` = weekdays; `1,3,5` = Mon/Wed/Fri
+   - `REPORT_FRESHNESS_HOURS` — rolling freshness window for dated content, default `72` hours; ordinary sources without timestamps are excluded
+   - `MIN_FRESH_ARTICLES` — publication gate, default `20`; a smaller fresh set fails without replacing the published report
 6. **Actions tab → "Daily Brief" workflow → Run workflow** to trigger manually for the first time
 
 Once the workflow turns green, your report lives at `https://<your-username>.github.io/<repo-name>/`. After that, **it refreshes daily at 08:00 in `REPORT_TZ`** (or 08:00 UTC if `REPORT_TZ` is unset).

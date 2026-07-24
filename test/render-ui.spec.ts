@@ -34,10 +34,112 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   await expect(page.locator("a[href^='javascript:']")).toHaveCount(0);
   await expect(page.locator(".article-title")).toContainText(article.displayTitle!);
   await expect(page.locator(".article-excerpt")).toHaveCount(0);
-  await expect(page.locator(".article-importance")).toContainText("8/10");
+  await expect(page.locator(".article-legacy-score")).toContainText("旧模型评分 8/10");
+  await expect(page.locator(".article-public-context")).toHaveCount(0);
+  await expect(page.locator(".brief-meta-summary")).toBeVisible();
+  await expect(page.locator(".brief-meta-summary")).toContainText("1 个来源");
+  await expect(page.locator(".brief-meta-summary")).not.toContainText("0 个来源");
+  await page.locator(".brief-meta-summary").click();
   await expect(page.locator("#runDailyButton")).toBeVisible();
   expect(pageErrors).toEqual([]);
   expect((await page.screenshot()).byteLength).toBeGreaterThan(1_000);
+});
+
+test("public review output exposes target evidence fields without operator controls", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const article: ArticleInput = {
+    sourceId: "bbc-world",
+    source: "BBC World",
+    title: "Public contract review fixture",
+    displayTitle: "目标公开契约评审样本",
+    url: "https://example.com/review/primary",
+    category: "politics",
+    summary: "这是一条用于验证公开优先级、证据状态、入选原因和多来源列表的评审样本。",
+    itemId: "review-item",
+    storyId: "review-story",
+    stableOrder: 1,
+    priorityLevel: "P1",
+    reasonCodes: ["HIGH_PUBLIC_IMPACT", "MULTI_SOURCE_CONFIRMED"],
+    evidenceState: "multi_source_confirmed",
+    evidenceNote: "两个独立来源对核心事实描述一致。",
+    uncertainties: ["实施细节仍待正式文件确认"],
+    sourceRefs: [
+      {
+        sourceId: "bbc-world",
+        publisher: "BBC World",
+        canonicalUrl: "https://example.com/review/primary",
+        originalTitle: "Primary report",
+        fetchedAt: new Date("2026-07-23T06:10:00.000Z"),
+        role: "primary_report",
+        originFamilyId: "family-primary",
+        familyBasis: "independent_report",
+        assignmentConfidence: 1,
+      },
+      {
+        sourceId: "ap-world",
+        publisher: "AP News",
+        canonicalUrl: "https://example.com/review/corroboration",
+        originalTitle: "Independent corroboration",
+        fetchedAt: new Date("2026-07-23T06:20:00.000Z"),
+        role: "independent_corroboration",
+        originFamilyId: "family-corroboration",
+        familyBasis: "independent_report",
+        assignmentConfidence: 1,
+      },
+    ],
+    revision: 2,
+  };
+  const previousWebMode = process.env.WEB_MODE;
+  const previousRepository = process.env.GITHUB_REPOSITORY;
+  process.env.WEB_MODE = "true";
+  process.env.GITHUB_REPOSITORY = "gtbwpkwjnb-alt/DailyBrief";
+  const html = renderHtml(
+    report,
+    groupRaw([article], sources),
+    "2026-07-23",
+    [{ id: "internal", name: "Internal failure", reason: "must stay private" }],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      ruleSetName: "evidence_first",
+      ruleSetVersion: "evidence-first-review-v1.4-r2",
+      revisionNotice: "Review revision 2",
+    },
+  );
+  if (previousWebMode === undefined) delete process.env.WEB_MODE;
+  else process.env.WEB_MODE = previousWebMode;
+  if (previousRepository === undefined) delete process.env.GITHUB_REPOSITORY;
+  else process.env.GITHUB_REPOSITORY = previousRepository;
+
+  await page.setContent(html);
+  await expect(page.locator(".brief-meta")).toHaveAttribute("open", "");
+  await expect(page.locator(".public-disclosure")).toContainText("evidence_first");
+  await expect(page.locator(".public-disclosure")).toContainText("Review revision 2");
+  await expect(page.locator("#runDailyButton")).toHaveCount(0);
+  await expect(page.locator("#filterConsole")).toHaveCount(0);
+  await expect(page.locator(".failed-sources")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "前往 GitHub Actions 手动运行" })).toHaveAttribute(
+    "href",
+    "https://github.com/gtbwpkwjnb-alt/DailyBrief/actions/workflows/daily.yml",
+  );
+  await expect(page.locator(".article-priority")).toContainText("P1");
+  await expect(page.locator(".article-legacy-score")).toHaveCount(0);
+  await expect(page.locator(".article-public-context")).toContainText("公共影响高");
+  await expect(page.locator(".article-public-context")).toContainText("实施细节仍待正式文件确认");
+  await expect(page.locator(".evidence-multi_source_confirmed")).toContainText("多源确认");
+  await expect(page.locator(".article-source-list a")).toHaveCount(2);
+  await expect(page.locator(".article-revision")).toContainText("修订 2");
+  await expect(page.locator(".article")).toHaveAttribute("data-item-id", "review-item");
+  await expect(page.locator(".article")).toHaveAttribute("data-story-id", "review-story");
+  await expect(page.locator(".article")).toHaveAttribute("data-stable-order", "1");
+  await expect(page.getByRole("link", { name: "反馈本期简报" })).toHaveAttribute(
+    "href",
+    /github\.com\/gtbwpkwjnb-alt\/DailyBrief\/issues\/new/,
+  );
+  expect(pageErrors).toEqual([]);
 });
 
 test("world cards show publisher attribution and the incremental filter control", async ({ page }) => {
@@ -63,8 +165,190 @@ test("world cards show publisher attribution and the incremental filter control"
   await expect(page.locator(".article-attribution")).toContainText("英国媒体");
   await expect(page.locator(".article-attribution")).toContainText("美国");
   await expect(page.locator(".article-attribution")).toContainText("伊朗");
+  await page.locator(".brief-meta-summary").click();
   await page.locator("#customFilterToggle").click();
   await expect(page.locator("#customFilterForm")).toBeVisible();
   await expect(page.locator("#customKeywordsInput")).toHaveAttribute("maxlength", "120");
   expect(pageErrors).toEqual([]);
+});
+
+test("Signal White theme remains readable without mobile overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const html = renderHtml(report, groupRaw([], sources), "2026-07-10", []);
+
+  await page.setContent(html);
+
+  const colors = {
+    background: await page.locator("body").evaluate(
+      (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
+    ),
+    header: await page.locator(".report-header").evaluate(
+      (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
+    ),
+    title: await page.locator(".report-title").evaluate(
+      (element: unknown) => (globalThis as any).getComputedStyle(element).color,
+    ),
+  };
+  const viewport = await page.evaluate(() => {
+    const browser = globalThis as any;
+    return {
+      width: browser.innerWidth,
+      scrollWidth: browser.document.documentElement.scrollWidth,
+    };
+  });
+
+  expect(colors).toEqual({
+    background: "rgb(244, 247, 250)",
+    header: "rgb(11, 19, 43)",
+    title: "rgb(248, 251, 255)",
+  });
+  expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.width);
+  await expect(page.locator(".tabs")).toBeVisible();
+  await expect(page.locator(".reading-context")).toBeVisible();
+});
+
+test("continuous stream keeps sections in one flow and progressively reveals more items", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const trending = Array.from({ length: 14 }, (_, index): ArticleInput => ({
+    sourceId: "google-trends-us",
+    source: "Google 热搜 · 美国",
+    title: `Trending item ${index + 1}`,
+    displayTitle: `连续热搜条目 ${index + 1}`,
+    url: `https://example.com/trending/${index + 1}`,
+    category: "trending",
+    summary: `用于验证连续信息流自动接入的第 ${index + 1} 条摘要。`,
+    tags: ["热搜", index % 2 === 0 ? "科技" : "社会"],
+    importance: 6,
+  }));
+  const tech: ArticleInput = {
+    sourceId: "github-trending",
+    source: "GitHub Trending",
+    title: "Continuous feed navigation",
+    displayTitle: "连续信息流导航",
+    url: "https://example.com/tech",
+    category: "tech",
+    summary: "验证点击栏目只负责滚动定位，不会隐藏其他栏目。",
+    tags: ["技术"],
+    importance: 8,
+  };
+  const politics: ArticleInput = {
+    sourceId: "bbc-world",
+    source: "BBC World",
+    title: "World update",
+    displayTitle: "国际动态更新",
+    url: "https://example.com/world-update",
+    category: "politics",
+    summary: "验证后续栏目能够自动接入同一条纵向信息流。",
+    tags: ["国际"],
+    importance: 7,
+  };
+  const html = renderHtml(report, groupRaw([...trending, tech, politics], sources), "2026-07-10", []);
+
+  await page.setContent(html);
+
+  await expect(page.locator("[data-panel='trending']")).toBeVisible();
+  await expect(page.locator(".article.stream-pending")).toHaveCount(4);
+  await page.locator(".tab[data-tab='tech']").click();
+  await expect(page.locator("[data-panel='tech']")).toBeVisible();
+  await expect(page.locator("[data-panel='trending']")).toBeVisible();
+  await expect(page.locator("#currentCategory")).toContainText("技术动态");
+  await expect(page.locator("#readingPosition")).toContainText("15 / 16");
+  await expect(page.locator(".panel:not(.active)")).toHaveCount(0);
+});
+
+test("mobile category spy keeps the active category inside the horizontal navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 760 });
+  const articles: ArticleInput[] = [
+    { sourceId: "google-trends-us", source: "Google Trends", title: "Trend", url: "https://example.com/t", category: "trending", summary: "趋势摘要" },
+    { sourceId: "github-trending", source: "GitHub Trending", title: "Tech", url: "https://example.com/a", category: "tech", summary: "技术摘要" },
+    { sourceId: "bbc-world", source: "BBC World", title: "World", url: "https://example.com/p", category: "politics", summary: "国际摘要" },
+    { sourceId: "wallstreetcn", source: "WallstreetCN", title: "Finance", url: "https://example.com/f", category: "finance", summary: "财经摘要" },
+    { sourceId: "v2ex-hot", source: "V2EX", title: "Community", url: "https://example.com/c", category: "tech", summary: "社区摘要" },
+  ];
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+
+  await page.setContent(html);
+  const communityTab = page.locator(".tab[data-tab='community']");
+  await communityTab.click();
+  await expect(communityTab).toHaveClass(/active/);
+  await expect.poll(async () => communityTab.evaluate((element) => {
+    const tab = element.getBoundingClientRect();
+    const nav = element.parentElement!.getBoundingClientRect();
+    return tab.left >= nav.left && tab.right <= nav.right;
+  })).toBe(true);
+});
+
+test("edition polling preserves existing query parameters", async ({ page }) => {
+  const requests: string[] = [];
+  const html = renderHtml(report, groupRaw([], sources), "2026-07-10", [], undefined, undefined, {
+    fetchedSources: 1,
+    successfulSources: 1,
+    sourceSuccessRate: 1,
+    fetchedArticles: 1,
+    dedupedArticles: 1,
+    generatedAt: "2026-07-10T08:00:00.000Z",
+    mode: "fresh",
+  });
+  await page.clock.install();
+  await page.route("https://brief.test/report**", async (route) => {
+    requests.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: "text/html", body: html });
+  });
+
+  await page.goto("https://brief.test/report?view=compact");
+  requests.length = 0;
+  await page.clock.fastForward(180_000);
+  await expect.poll(() => requests.find((url) => url.includes("edition=")) ?? "").not.toBe("");
+
+  const refreshUrl = new URL(requests.find((url) => url.includes("edition="))!);
+  expect(refreshUrl.searchParams.get("view")).toBe("compact");
+  expect(refreshUrl.searchParams.get("edition")).toMatch(/^\d+$/);
+});
+
+test("tag navigation reveals a matching article beyond the current batch", async ({ page }) => {
+  const articles = Array.from({ length: 13 }, (_, index): ArticleInput => ({
+    sourceId: "google-trends-us",
+    source: "Google Trends",
+    title: `Tagged item ${index + 1}`,
+    url: `https://example.com/tagged/${index + 1}`,
+    category: "trending",
+    summary: `标签跳转测试 ${index + 1}`,
+    tags: [index === 12 ? "后续目标" : "首批标签"],
+  }));
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+
+  await page.setContent(html);
+  const target = page.locator(".article[data-article-url='https://example.com/tagged/13']");
+  await expect(target).toHaveClass(/stream-pending/);
+  await page.locator(".brief-meta-summary").click();
+  await page.locator(".tag-cloud-chip[data-tag='后续目标']").click();
+  await expect(target).not.toHaveClass(/stream-pending/);
+  await expect(target).toBeVisible();
+});
+
+test("reload anchor restores the matching article after page load", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const articles = Array.from({ length: 14 }, (_, index): ArticleInput => ({
+    sourceId: "google-trends-us",
+    source: "Google Trends",
+    title: `Restored item ${index + 1}`,
+    url: `https://example.com/restored/${index + 1}`,
+    category: "trending",
+    summary: `刷新后阅读位置恢复测试 ${index + 1}`,
+  }));
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+  await page.route("https://brief.test/restore", async (route) => {
+    await route.fulfill({ status: 200, contentType: "text/html", body: html });
+  });
+
+  await page.goto("https://brief.test/restore");
+  const targetUrl = "https://example.com/restored/13";
+  await page.evaluate((url) => (globalThis as any).sessionStorage.setItem("dailybrief.reloadAnchor", url), targetUrl);
+  await page.reload({ waitUntil: "load" });
+
+  const target = page.locator(`.article[data-article-url='${targetUrl}']`);
+  await expect(target).not.toHaveClass(/stream-pending/);
+  await expect(target).toBeInViewport();
+  await expect.poll(() => page.evaluate(() => (globalThis as any).scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (globalThis as any).sessionStorage.getItem("dailybrief.reloadAnchor"))).toBeNull();
 });
