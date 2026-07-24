@@ -909,22 +909,19 @@ async function main() {
     generatedAt: new Date().toISOString(),
     mode: cachedRun ? "reuse" : "fresh",
   };
-  const enrichmentHealth = cachedRun && customKeywords.length === 0
-    ? CATEGORY_CONFIG.map((cfg) => {
-        const items = visibleByCategory.get(cfg.key) ?? [];
-        const enriched = items.filter((article) => article.displayTitle && article.summary).length;
-        console.log(`[daily]  ${cfg.key.padEnd(12)} cache reuse ${enriched}/${items.length}`);
-        return { key: cfg.key, requested: items.length, enriched };
-      })
-    : await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
+  const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
     const items = visibleByCategory.get(cfg.key) ?? [];
     if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
-    const targets = cachedRun && customKeywords.length > 0
-      ? items.filter((article) => (article.interestMatches?.length ?? 0) > 0 || !article.displayTitle || !article.summary)
+    const targets = cachedRun
+      ? items.filter((article) =>
+          !article.displayTitle
+          || !article.summary
+          || (customKeywords.length > 0 && (article.interestMatches?.length ?? 0) > 0),
+        )
       : items;
     if (targets.length === 0) {
       const enriched = items.filter((article) => article.displayTitle && article.summary).length;
-      console.log(`[daily]  ${cfg.key.padEnd(12)} no new interest matches; cache coverage ${enriched}/${items.length}`);
+      console.log(`[daily]  ${cfg.key.padEnd(12)} cache complete ${enriched}/${items.length}`);
       return { key: cfg.key, requested: items.length, enriched };
     }
     const t1 = Date.now();
