@@ -85,6 +85,13 @@ const runStatsSchema = z.object({
   sourceSuccessRate: z.number().min(0).max(1),
   fetchedArticles: z.number().int().nonnegative(),
   dedupedArticles: z.number().int().nonnegative(),
+  freshnessWindowHours: z.number().int().min(1).max(336).optional(),
+  freshArticles: z.number().int().nonnegative().optional(),
+  staleArticlesRejected: z.number().int().nonnegative().optional(),
+  undatedArticlesRejected: z.number().int().nonnegative().optional(),
+  futureArticlesRejected: z.number().int().nonnegative().optional(),
+  liveSnapshotArticles: z.number().int().nonnegative().optional(),
+  newestPublishedAt: z.string().datetime().optional(),
   generatedAt: z.string().datetime(),
   mode: z.enum(["fresh", "reuse"]),
 });

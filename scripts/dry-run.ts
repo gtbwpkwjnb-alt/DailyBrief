@@ -21,7 +21,12 @@ async function main() {
   console.log(`Fetching from sources (concurrency=${concurrency})…\n`);
   const articles: ArticleInput[] = [];
 
-  const enabled = sources.filter((s) => s.enabled !== false);
+  const requestedIds = new Set(process.argv.slice(2));
+  const enabled = sources.filter((source) =>
+    source.enabled !== false && (requestedIds.size === 0 || requestedIds.has(source.id)),
+  );
+  const missingIds = [...requestedIds].filter((id) => !enabled.some((source) => source.id === id));
+  if (missingIds.length > 0) throw new Error(`unknown or disabled source ids: ${missingIds.join(", ")}`);
   let failed = 0;
   for (let offset = 0; offset < enabled.length; offset += concurrency) {
     const batch = enabled.slice(offset, offset + concurrency);

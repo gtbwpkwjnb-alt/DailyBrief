@@ -2,6 +2,7 @@ export type Category = "trending" | "tech" | "finance" | "politics";
 export type SourceType = "rss" | "api" | "scrape" | "reader";
 export type SourceProvider = "direct" | "freshrss" | "miniflux";
 export type SourceTier = "core" | "standard" | "supplement";
+export type SourceFreshnessMode = "published_at" | "live_snapshot";
 export type PublicPriorityLevel = "P0" | "P1" | "P2" | "P3" | "P4";
 export type PublicEvidenceState =
   | "multi_source_confirmed"
@@ -103,6 +104,10 @@ export interface SourceDef {
    * Default: 3 for most sources, 5 for top-tier sources, 1 for disabled.
    */
   priority?: number;
+  /** How freshness is established. Defaults to a required publishedAt. */
+  freshnessMode?: SourceFreshnessMode;
+  /** Optional per-source override for the global REPORT_FRESHNESS_HOURS. */
+  maxAgeHours?: number;
 }
 
 export interface RawArticle {

@@ -1173,7 +1173,12 @@ export interface ReviewResult {
   summary: string;
   issues: string[];
   suggestions: string[];
+  reviewState: "passed" | "failed" | "unavailable";
+  publicationState: "eligible" | "blocked" | "limited";
+  failureCodes: string[];
 }
+
+export type ReviewRunner = typeof runLlm;
 
 /**
  * Final quality check before publishing.
@@ -1181,9 +1186,10 @@ export interface ReviewResult {
  */
 export async function aiReview(
   categorySummary: string,
+  reviewRunner: ReviewRunner = runLlm,
 ): Promise<ReviewResult> {
   try {
-    const { text } = await runLlm({
+    const { text } = await reviewRunner({
       systemPrompt: AI_REVIEW_PROMPTS,
       userPrompt: `请审核以下日报内容：\n\n${categorySummary}\n\n请输出 JSON 格式审核报告。`,
       timeoutMs: 30_000,
@@ -1196,16 +1202,27 @@ export async function aiReview(
       parsed = JSON.parse(jsonrepair(cleaned));
     }
     const issues = parsed.issues ?? [];
-    const hasBlockingIssue = issues.some((issue) => /编造|捏造|幻觉|不实|无依据|事实错误|事实性错误|严重错误|缺少摘要|无摘要|未翻译|unsupported|fabricat|hallucin|false claim/i.test(issue));
+    const hasBlockingIssue = parsed.passed === false || issues.some((issue) => /编造|捏造|幻觉|不实|无依据|事实错误|事实性错误|严重错误|缺少摘要|无摘要|未翻译|unsupported|fabricat|hallucin|false claim/i.test(issue));
     return {
-      passed: parsed.passed === false ? hasBlockingIssue : true,
+      passed: !hasBlockingIssue,
       summary: parsed.summary ?? "",
       issues,
       suggestions: parsed.suggestions ?? [],
+      reviewState: hasBlockingIssue ? "failed" : "passed",
+      publicationState: hasBlockingIssue ? "blocked" : "eligible",
+      failureCodes: hasBlockingIssue ? ["AI_REVIEW_BLOCKED"] : [],
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[enrich] AI review failed: ${msg}`);
-    return { passed: true, summary: "审核跳过（LLM调用失败）", issues: [], suggestions: [] };
+    return {
+      passed: false,
+      summary: "审核服务不可用，尚未通过质量审核。",
+      issues: ["AI quality review service unavailable"],
+      suggestions: [],
+      reviewState: "unavailable",
+      publicationState: "blocked",
+      failureCodes: ["AI_REVIEW_UNAVAILABLE"],
+    };
   }
 }

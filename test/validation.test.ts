@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
-import { hasUnsupportedHighRiskClaim } from "../lib/ai/enrich";
-import { selectRoundRobin } from "../lib/ai/pipeline";
+import { aiReview, hasUnsupportedHighRiskClaim } from "../lib/ai/enrich";
+import { createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { safeExternalUrl } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
 import { parseFreshRssItems, parseMinifluxEntries } from "../lib/sources/reader";
+import { configuredFreshnessHours, filterFreshArticles } from "../lib/sources/freshness";
 import { detectCoverageCountries, normalizeCustomKeywords } from "../lib/editorial/context";
 
 test("safeExternalUrl only permits HTTP(S) links", () => {
@@ -32,6 +33,35 @@ test("source registry rejects unsafe URLs and duplicate IDs", () => {
   assert.equal(sourceRegistrySchema.safeParse([{ ...source, type: "reader", provider: "freshrss" }]).success, true);
   assert.equal(sourceRegistrySchema.safeParse([{ ...source, category: "politics" }]).success, false);
   assert.equal(sourceRegistrySchema.safeParse([{ ...source, category: "politics", originCountry: "美国" }]).success, true);
+  assert.equal(sourceRegistrySchema.safeParse([{ ...source, freshnessMode: "live_snapshot" }]).success, true);
+  assert.equal(sourceRegistrySchema.safeParse([{ ...source, maxAgeHours: 0 }]).success, false);
+});
+
+test("freshness policy rejects stale, undated, and far-future articles", () => {
+  const registry = [
+    { id: "dated", name: "Dated", type: "rss" as const, url: "https://example.com/rss", category: "tech" as const },
+    { id: "live", name: "Live", type: "scrape" as const, url: "https://example.com/live", category: "tech" as const, freshnessMode: "live_snapshot" as const },
+  ];
+  const result = filterFreshArticles([
+    { sourceId: "dated", title: "Recent", url: "https://example.com/recent", category: "tech" as const, publishedAt: new Date("2026-07-23T08:00:00Z") },
+    { sourceId: "dated", title: "Stale", url: "https://example.com/stale", category: "tech" as const, publishedAt: new Date("2026-07-19T00:00:00Z") },
+    { sourceId: "dated", title: "Undated", url: "https://example.com/undated", category: "tech" as const },
+    { sourceId: "dated", title: "Future", url: "https://example.com/future", category: "tech" as const, publishedAt: new Date("2026-07-25T12:00:00Z") },
+    { sourceId: "live", title: "Live ranking", url: "https://example.com/ranking", category: "tech" as const },
+  ], registry, {
+    referenceTime: new Date("2026-07-24T08:00:00Z"),
+    maxAgeHours: 72,
+  });
+
+  assert.deepEqual(result.articles.map((article) => article.title), ["Recent", "Live ranking"]);
+  assert.equal(result.stats.freshArticles, 2);
+  assert.equal(result.stats.staleArticlesRejected, 1);
+  assert.equal(result.stats.undatedArticlesRejected, 1);
+  assert.equal(result.stats.futureArticlesRejected, 1);
+  assert.equal(result.stats.liveSnapshotArticles, 1);
+  assert.equal(result.stats.newestPublishedAt, "2026-07-23T08:00:00.000Z");
+  assert.equal(configuredFreshnessHours("48"), 48);
+  assert.throws(() => configuredFreshnessHours("72hours"));
 });
 
 test("reader providers normalize their documented response shapes", () => {
@@ -138,7 +168,7 @@ test("digest candidates prioritize explicit interest matches within a source", (
       publishedAt: new Date("2026-07-11T08:00:00Z"),
       interestMatches: ["AI"],
     },
-  ], 1);
+  ], 1, { referenceTime: new Date("2026-07-12T08:00:00Z"), maxAgeHours: 72 });
 
   assert.equal(selected[0]?.url, "https://example.com/interest");
 });
@@ -164,4 +194,32 @@ test("high-risk enrichment claims require evidence in the source excerpt", () =>
   assert.equal(hasUnsupportedHighRiskClaim(item, fabricated), "死亡/遇害");
   assert.equal(hasUnsupportedHighRiskClaim({ ...item, excerpt: "The senator died after a long illness." }, fabricated), null);
   assert.equal(hasUnsupportedHighRiskClaim(item, supported), null);
+});
+
+test("reviewer outage is never reported as a passed review", async () => {
+  const result = await aiReview("test", async () => {
+    throw new Error("reviewer unavailable");
+  });
+
+  assert.equal(result.passed, false);
+  assert.equal(result.reviewState, "unavailable");
+  assert.equal(result.publicationState, "blocked");
+  assert.deepEqual(result.failureCodes, ["AI_REVIEW_UNAVAILABLE"]);
+});
+
+test("reviewer outage fallback is source-only and excludes high-risk content", () => {
+  const lowRisk = {
+    sourceId: "example", source: "Example", title: "Product update released", url: "https://example.com/update",
+    excerpt: "The publisher announced a product update.", category: "tech" as const,
+    summary: "An AI-written summary that must not be used.",
+  };
+  const safeArticles = createReviewUnavailableFallbackArticles([lowRisk]);
+  const fallback = createReviewUnavailableFallback(safeArticles);
+
+  assert.equal(hasHighRiskReviewContent(lowRisk), false);
+  assert.match(fallback.tech_briefs[0]!.summary, /信息有限|source excerpt only/i);
+  assert.doesNotMatch(fallback.tech_briefs[0]!.summary, /AI-written summary/);
+  assert.equal(safeArticles[0]!.displayTitle, lowRisk.title);
+  assert.doesNotMatch(safeArticles[0]!.summary ?? "", /AI-written summary/);
+  assert.equal(hasHighRiskReviewContent({ ...lowRisk, title: "Official says minister resigned" }), true);
 });

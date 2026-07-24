@@ -162,6 +162,8 @@ jobs:
           MINIFLUX_API_URL: ${{ vars.MINIFLUX_API_URL }}
           MINIFLUX_API_TOKEN: ${{ secrets.MINIFLUX_API_TOKEN }}
           READER_FETCH_LIMIT: ${{ vars.READER_FETCH_LIMIT }}
+          REPORT_FRESHNESS_HOURS: ${{ vars.REPORT_FRESHNESS_HOURS }}
+          MIN_FRESH_ARTICLES: ${{ vars.MIN_FRESH_ARTICLES }}
           REPORT_LOCALE: ${{ vars.REPORT_LOCALE || 'zh' }}
           REPORT_TZ: ${{ vars.REPORT_TZ }}
           WEB_MODE: "true"

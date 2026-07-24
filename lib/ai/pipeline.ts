@@ -4,6 +4,10 @@ import { extractJson } from "./json-util";
 import { SYSTEM_PROMPT_DIGEST_EN, SYSTEM_PROMPT_DIGEST_ZH } from "./prompts";
 import { REPORT_LOCALE } from "../sources/registry";
 import type { Category, RawArticle } from "../sources/types";
+import {
+  configuredFreshnessHours,
+  isPublishedWithinFreshnessWindow,
+} from "../sources/freshness";
 
 const SYSTEM_PROMPT_DIGEST =
   REPORT_LOCALE === "en" ? SYSTEM_PROMPT_DIGEST_EN : SYSTEM_PROMPT_DIGEST_ZH;
@@ -44,14 +48,55 @@ export interface ArticleInput extends RawArticle {
   source: string;
 }
 
+const HIGH_RISK_REVIEW_CONTENT = /病逝|去世|死亡|身亡|遇害|被杀|逮捕|被捕|拘留|辞职|下台|被解职|died|dead|death|killed|assassinated|arrested|detained|resigned|stepped down|removed from office/i;
+
+export function hasHighRiskReviewContent(item: Pick<ArticleInput, "title" | "excerpt" | "summary" | "displayTitle">): boolean {
+  return HIGH_RISK_REVIEW_CONTENT.test(`${item.title} ${item.excerpt ?? ""} ${item.displayTitle ?? ""} ${item.summary ?? ""}`);
+}
+
+export function createReviewUnavailableFallbackArticles(articles: ArticleInput[]): ArticleInput[] {
+  return articles.map((article) => ({
+    ...article,
+    displayTitle: article.title,
+    summary: REPORT_LOCALE === "en"
+      ? `Information limited: source excerpt only. ${(article.excerpt ?? article.title).slice(0, 260)}`
+      : `信息有限：仅展示来源原文摘录。${(article.excerpt ?? article.title).slice(0, 260)}`,
+    importance: 1,
+    tags: [REPORT_LOCALE === "en" ? "Information limited" : "信息有限"],
+    coverageCountries: [],
+    interestMatches: [],
+  }));
+}
+
+export function createReviewUnavailableFallback(articles: ArticleInput[]): DailyReport {
+  const grouped: Record<Category, ArticleInput[]> = { trending: [], tech: [], finance: [], politics: [] };
+  for (const article of articles) grouped[article.category].push(article);
+  const toBriefs = (items: ArticleInput[], limit: number): BriefItem[] => items.slice(0, limit).map((article) => ({
+    title: article.title,
+    url: article.url,
+    source: article.source,
+    summary: article.summary ?? article.excerpt ?? article.title,
+    importance: 1,
+  }));
+  return {
+    hero_headline: REPORT_LOCALE === "en" ? "Daily Brief - source-only edition" : "每日简报 - 来源原文版",
+    daily_overview: REPORT_LOCALE === "en"
+      ? "The AI quality review service was unavailable. This limited edition contains source titles and excerpts only, without AI factual synthesis."
+      : "AI 质量审核服务不可用。本次为信息有限版本，仅展示来源标题和原文摘录，不包含 AI 事实归纳。",
+    tech_briefs: toBriefs(grouped.tech, 5),
+    finance_briefs: toBriefs(grouped.finance, 5),
+    politics_briefs: toBriefs(grouped.politics, 3),
+    editor_note: REPORT_LOCALE === "en" ? "Quality review unavailable; source-only edition." : "质量审核不可用；仅发布来源原文版。",
+    keywords: [],
+  };
+}
+
 const PER_CATEGORY_LIMIT: Record<Category, number> = {
   trending: 20,
   tech: 25,
   finance: 20,
   politics: 15,
 };
-
-const MAX_AGE_DAYS = 14;
 
 /**
  * Pick `limit` items from `items` so every source gets a fair shot.
@@ -61,7 +106,7 @@ const MAX_AGE_DAYS = 14;
  * source came first 100% of the quota — e.g. all 25 tech slots filled by
  * Hacker News before GitHub Trending / Solidot / V2EX / 阮一峰 got a turn.
  *
- * Strategy: drop items older than MAX_AGE_DAYS, group by sourceId,
+ * Strategy: drop dated items outside the shared freshness window, group by sourceId,
  * sort each bucket newest-first, then round-robin one item per source
  * until we hit the limit. Sources with fewer items naturally drop out
  * and others absorb the slack.
@@ -69,10 +114,13 @@ const MAX_AGE_DAYS = 14;
 export function selectRoundRobin(
   items: ArticleInput[],
   limit: number,
+  options: { referenceTime?: Date; maxAgeHours?: number } = {},
 ): ArticleInput[] {
-  const cutoff = Date.now() - MAX_AGE_DAYS * 86_400_000;
+  const referenceTime = options.referenceTime ?? new Date();
+  const maxAgeHours = options.maxAgeHours ?? configuredFreshnessHours();
   const fresh = items.filter(
-    (it) => !it.publishedAt || it.publishedAt.getTime() >= cutoff,
+    (it) => !it.publishedAt
+      || isPublishedWithinFreshnessWindow(it.publishedAt, referenceTime, maxAgeHours),
   );
 
   const bySource = new Map<string, ArticleInput[]>();

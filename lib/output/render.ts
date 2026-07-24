@@ -231,6 +231,13 @@ export type RunStats = {
   sourceSuccessRate: number;
   fetchedArticles: number;
   dedupedArticles: number;
+  freshnessWindowHours?: number;
+  freshArticles?: number;
+  staleArticlesRejected?: number;
+  undatedArticlesRejected?: number;
+  futureArticlesRejected?: number;
+  liveSnapshotArticles?: number;
+  newestPublishedAt?: string;
   generatedAt: string;
   mode: "fresh" | "reuse";
 };
@@ -912,9 +919,14 @@ function runStatsText(stats?: RunStats): string {
   const mode = stats.mode === "reuse"
     ? (REPORT_LOCALE === "en" ? "cache reuse" : "5小时内复用缓存")
     : (REPORT_LOCALE === "en" ? "fresh fetch" : "本次重新抓取");
+  const freshness = stats.freshArticles === undefined
+    ? ""
+    : REPORT_LOCALE === "en"
+      ? ` → ${stats.freshArticles} fresh (${stats.freshnessWindowHours ?? 72}h)`
+      : ` → 新鲜内容 ${stats.freshArticles}（${stats.freshnessWindowHours ?? 72}小时）`;
   return REPORT_LOCALE === "en"
-    ? `Sources ${stats.fetchedSources} · Articles ${stats.fetchedArticles} → ${stats.dedupedArticles} after dedup · Success ${success} · ${mode}`
-    : `抓取信息源 ${stats.fetchedSources} · 信息 ${stats.fetchedArticles} → 去重后 ${stats.dedupedArticles} · 成功率 ${success} · ${mode}`;
+    ? `Sources ${stats.fetchedSources} · Articles ${stats.fetchedArticles} → ${stats.dedupedArticles} after dedup${freshness} · Success ${success} · ${mode}`
+    : `抓取信息源 ${stats.fetchedSources} · 信息 ${stats.fetchedArticles} → 去重后 ${stats.dedupedArticles}${freshness} · 成功率 ${success} · ${mode}`;
 }
 
 function filterProfileText(profile: FilterProfile): { rules: string; keywords: string } {
@@ -2953,7 +2965,8 @@ export function renderHtml(
     function statsText(runStats) {
       if (!runStats) return '';
       var rate = (Number(runStats.sourceSuccessRate || 0) * 100).toFixed(1) + '%';
-      return '${REPORT_LOCALE === "en" ? "Sources" : "抓取信息源"} ' + (runStats.fetchedSources || 0) + ' · ${REPORT_LOCALE === "en" ? "Articles" : "信息"} ' + (runStats.fetchedArticles || 0) + ' → ${REPORT_LOCALE === "en" ? "deduped" : "去重后"} ' + (runStats.dedupedArticles || 0) + ' · ${REPORT_LOCALE === "en" ? "Success" : "成功率"} ' + rate;
+      var freshness = runStats.freshArticles === undefined ? '' : ' → ${REPORT_LOCALE === "en" ? "fresh" : "新鲜内容"} ' + runStats.freshArticles + ' (' + (runStats.freshnessWindowHours || 72) + 'h)';
+      return '${REPORT_LOCALE === "en" ? "Sources" : "抓取信息源"} ' + (runStats.fetchedSources || 0) + ' · ${REPORT_LOCALE === "en" ? "Articles" : "信息"} ' + (runStats.fetchedArticles || 0) + ' → ${REPORT_LOCALE === "en" ? "deduped" : "去重后"} ' + (runStats.dedupedArticles || 0) + freshness + ' · ${REPORT_LOCALE === "en" ? "Success" : "成功率"} ' + rate;
     }
 
     function renderStatus(state) {

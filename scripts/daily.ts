@@ -6,8 +6,12 @@ import path from "node:path";
 import { sources, REPORT_LOCALE } from "../lib/sources/registry";
 import { fetchSource } from "../lib/sources/dispatch";
 import { describeHttpError, probeHttpEndpoints, proxyLabel } from "../lib/sources/http";
+import { filterFreshArticles } from "../lib/sources/freshness";
 import {
+  createReviewUnavailableFallback,
+  createReviewUnavailableFallbackArticles,
   generateDailyReport,
+  hasHighRiskReviewContent,
   type ArticleInput,
   type DailyReport,
 } from "../lib/ai/pipeline";
@@ -750,6 +754,7 @@ async function main() {
   const customKeywords = requestedCustomKeywords();
   const cachedRun = loadRecentRun(date);
   const completeCachedReport = cachedRun
+    && cachedRun.runStats?.freshArticles !== undefined
     && customKeywords.length === 0
     && fs.existsSync(path.join(dateDir, `${date}.json`))
     && fs.existsSync(path.join(dateDir, `${date}.html`));
@@ -838,6 +843,33 @@ async function main() {
     articles.push(...deduped);
   }
 
+  const dedupedArticleCount = cachedRun?.runStats?.dedupedArticles ?? articles.length;
+  const freshness = filterFreshArticles(articles, sources);
+  articles.length = 0;
+  articles.push(...freshness.articles);
+  const minFreshArticles = readPositiveInt("MIN_FRESH_ARTICLES", 20);
+  const rejectedArticles = freshness.stats.staleArticlesRejected
+    + freshness.stats.undatedArticlesRejected
+    + freshness.stats.futureArticlesRejected;
+  console.log(
+    `[daily] freshness: ${freshness.stats.freshArticles}/${dedupedArticleCount} kept `
+      + `(${freshness.stats.freshnessWindowHours}h window, ${rejectedArticles} rejected)`,
+  );
+  appendRunLog(
+    date,
+    `freshness ${freshness.stats.freshArticles}/${dedupedArticleCount}; `
+      + `stale=${freshness.stats.staleArticlesRejected} `
+      + `undated=${freshness.stats.undatedArticlesRejected} `
+      + `future=${freshness.stats.futureArticlesRejected} `
+      + `live=${freshness.stats.liveSnapshotArticles}`,
+  );
+  if (articles.length < minFreshArticles) {
+    appendRunLog(date, `blocked by MIN_FRESH_ARTICLES ${minFreshArticles}`);
+    throw new Error(
+      `fresh article count ${articles.length} is below MIN_FRESH_ARTICLES ${minFreshArticles}`,
+    );
+  }
+
   // Phase 4: Consolidated AI optimization — one LLM call per category.
   // Replaces 8 separate enrich calls (GH, Papers, Finance, Politics,
   // Trends, Reddit, X Viral, Tags) with 4 category-level calls.
@@ -867,13 +899,13 @@ async function main() {
     visibleByCategory.set(category, visible);
   }
 
-  const dedupedArticleCount = articles.length;
   const runStats: RunStats = {
     fetchedSources,
     successfulSources,
     sourceSuccessRate,
     fetchedArticles: fetchedArticleCount,
     dedupedArticles: dedupedArticleCount,
+    ...freshness.stats,
     generatedAt: new Date().toISOString(),
     mode: cachedRun ? "reuse" : "fresh",
   };
@@ -951,12 +983,12 @@ async function main() {
   // Phase 6: Generate digest (hero headlines + briefs + keywords)
   console.log(`[daily] generating digest with ${getModelTag()}…`);
   const digestT0 = Date.now();
-  const { report } = await generateDailyReport(articles);
+  let { report } = await generateDailyReport(articles);
   if (trading) report.trading = trading;
   console.log(`[daily] digest ready in ${((Date.now() - digestT0) / 1000).toFixed(1)}s`);
 
   const base = path.join(dateDir, date);
-  const raw = groupRaw(articles, sources, { customKeywords });
+  let raw = groupRaw(articles, sources, { customKeywords });
 
   // Phase 7: Deterministic category summaries from already-enriched visible
   // items. This avoids five additional LLM calls and keeps the overview tied
@@ -998,8 +1030,27 @@ async function main() {
   if (review.issues.length > 0) {
     for (const issue of review.issues) console.warn(`  [review] ${issue}`);
   }
-  if (!review.passed) {
-    appendRunLog(date, `blocked by AI quality review: ${review.issues.join("; ")}`);
+  const reviewedArticles = Array.from(visibleByCategory.values()).flat();
+  const highRiskReviewContent = reviewedArticles.some(hasHighRiskReviewContent);
+  if (review.reviewState === "unavailable" && !highRiskReviewContent) {
+    const safeArticles = createReviewUnavailableFallbackArticles(reviewedArticles);
+    report = createReviewUnavailableFallback(safeArticles);
+    raw = groupRaw(safeArticles, sources, { customKeywords: [] });
+    for (const key of Object.keys(catSummaries)) delete catSummaries[key];
+    review.publicationState = "limited";
+    review.summary = "审核服务不可用；已发布仅含来源原文标题和摘录的信息有限版本。";
+    review.suggestions.push("请在审核服务恢复后重新生成正式日报。");
+  }
+  if (review.publicationState === "blocked") {
+    fs.writeFileSync(`${base}-quality-review.json`, JSON.stringify({
+      date,
+      reviewedAt: new Date().toISOString(),
+      publicationState: review.publicationState,
+      reviewState: review.reviewState,
+      failureCodes: review.failureCodes,
+      issues: review.issues,
+    }, null, 2), "utf8");
+    appendRunLog(date, `blocked by AI quality review [${review.failureCodes.join(",")}]: ${review.issues.join("; ")}`);
     throw new Error(`AI quality review did not pass: ${review.summary}`);
   }
 
@@ -1012,6 +1063,15 @@ async function main() {
     "utf8",
   );
   fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review, runStats, filterProfile), "utf8");
+  fs.writeFileSync(`${base}-quality-review.json`, JSON.stringify({
+    date,
+    reviewedAt: new Date().toISOString(),
+    publicationState: review.publicationState,
+    reviewState: review.reviewState,
+    failureCodes: review.failureCodes,
+    issues: review.issues,
+    suggestions: review.suggestions,
+  }, null, 2), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[daily] wrote ${base}.{json,html,md,articles.json}`);

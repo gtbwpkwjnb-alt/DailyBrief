@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadAllSources } from "../lib/sources/registry";
 import { fetchSource } from "../lib/sources/dispatch";
+import { filterFreshArticles } from "../lib/sources/freshness";
 import { renderHtml } from "../lib/output/render";
 import { groupRaw } from "../lib/output/render";
 import type { FilterProfile, RunStats } from "../lib/output/render";
@@ -249,6 +250,9 @@ const server = http.createServer(async (req, res) => {
         const newItems = items.filter((it) => !existingUrls.has(it.url));
         if (newItems.length > 0) {
           latest.articles.push(...newItems.map((it) => ({ ...it, source: source.name })));
+          const freshness = filterFreshArticles(latest.articles, allSources);
+          latest.articles = freshness.articles;
+          if (latest.runStats) latest.runStats = { ...latest.runStats, ...freshness.stats };
           // Re-render HTML with updated data
           const raw = groupRaw(latest.articles, allSources, { customKeywords: latest.filterProfile?.customKeywords });
           const dateDir = latest.date;

@@ -6,6 +6,7 @@ import path from "node:path";
 import type { ArticleInput, DailyReport } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { sources } from "../lib/sources/registry";
+import { filterFreshArticles } from "../lib/sources/freshness";
 import { todayKey } from "../lib/utils";
 
 const OUTPUT_DIR = "daily_reports";
@@ -48,11 +49,19 @@ async function main() {
     `../lib/output/render?cacheBust=${Date.now()}`
   );
 
-  const raw = groupRaw(articles, sources, { customKeywords: filterProfile?.customKeywords });
+  const freshness = filterFreshArticles(articles, sources, {
+    referenceTime: runStats?.generatedAt ? new Date(runStats.generatedAt) : new Date(),
+  });
+  const effectiveRunStats = runStats ? { ...runStats, ...freshness.stats } : undefined;
+  console.log(
+    `[render] freshness kept ${freshness.stats.freshArticles}/${articles.length} articles `
+      + `(${freshness.stats.freshnessWindowHours}h window)`,
+  );
+  const raw = groupRaw(freshness.articles, sources, { customKeywords: filterProfile?.customKeywords });
   const dateDir = path.join(OUTPUT_DIR, date);
   fs.mkdirSync(dateDir, { recursive: true });
   const base = path.join(dateDir, date);
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, {}, undefined, runStats, filterProfile), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, {}, undefined, effectiveRunStats, filterProfile), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[render] wrote ${base}.{html,md}`);

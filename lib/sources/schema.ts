@@ -21,6 +21,8 @@ export const sourceSchema = z.object({
   notes: z.string().optional(),
   keywords: z.array(z.string().trim().min(1)).optional(),
   priority: z.number().int().min(1).max(5).optional(),
+  freshnessMode: z.enum(["published_at", "live_snapshot"]).optional(),
+  maxAgeHours: z.number().int().min(1).max(336).optional(),
 });
 
 export const sourceRegistrySchema = z.array(sourceSchema).superRefine((sources, ctx) => {
