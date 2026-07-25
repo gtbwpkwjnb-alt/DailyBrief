@@ -53,6 +53,7 @@ const articleSchema = z.object({
   excerpt: z.string().optional(),
   publishedAt: z.string().datetime().optional(),
   summary: z.string().optional(),
+  cnSummary: z.string().optional(),
   displayTitle: z.string().optional(),
   importance: z.number().min(1).max(10).optional(),
   meta: z.string().optional(),
@@ -85,6 +86,9 @@ const runStatsSchema = z.object({
   sourceSuccessRate: z.number().min(0).max(1),
   fetchedArticles: z.number().int().nonnegative(),
   dedupedArticles: z.number().int().nonnegative(),
+  displayedArticles: z.number().int().nonnegative().optional(),
+  aiEnrichedArticles: z.number().int().nonnegative().optional(),
+  suppressedArticles: z.number().int().nonnegative().optional(),
   freshnessWindowHours: z.number().int().min(1).max(336).optional(),
   freshArticles: z.number().int().nonnegative().optional(),
   staleArticlesRejected: z.number().int().nonnegative().optional(),
@@ -102,12 +106,20 @@ const filterProfileSchema = z.object({
   mode: z.enum(["base", "incremental"]),
 });
 
+const qualityReviewSchema = z.object({
+  passed: z.boolean(),
+  summary: z.string(),
+  issues: z.array(z.string()),
+  suggestions: z.array(z.string()),
+});
+
 const sidecarSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   articles: z.array(articleSchema),
   failedSources: z.array(failedSourceSchema).default([]),
   runStats: runStatsSchema.optional(),
   filterProfile: filterProfileSchema.optional(),
+  qualityReview: qualityReviewSchema.optional(),
 });
 
 export type ReportSidecar = {
@@ -116,20 +128,25 @@ export type ReportSidecar = {
   failedSources: z.infer<typeof failedSourceSchema>[];
   runStats?: RunStats;
   filterProfile?: FilterProfile;
+  qualityReview?: z.infer<typeof qualityReviewSchema>;
 };
 
 export function parseReportSidecar(value: unknown): ReportSidecar {
   const parsed = sidecarSchema.parse(value);
   return {
     ...parsed,
-    articles: parsed.articles.map((article) => ({
-      ...article,
-      publishedAt: article.publishedAt ? new Date(article.publishedAt) : undefined,
-      sourceRefs: article.sourceRefs?.map((source) => ({
-        ...source,
-        publishedAt: source.publishedAt ? new Date(source.publishedAt) : undefined,
-        fetchedAt: source.fetchedAt ? new Date(source.fetchedAt) : undefined,
-      })),
-    })),
+    articles: parsed.articles.map((article) => {
+      const { cnSummary, ...current } = article;
+      return {
+        ...current,
+        summary: current.summary ?? cnSummary,
+        publishedAt: current.publishedAt ? new Date(current.publishedAt) : undefined,
+        sourceRefs: current.sourceRefs?.map((source) => ({
+          ...source,
+          publishedAt: source.publishedAt ? new Date(source.publishedAt) : undefined,
+          fetchedAt: source.fetchedAt ? new Date(source.fetchedAt) : undefined,
+        })),
+      };
+    }),
   };
 }

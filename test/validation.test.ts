@@ -1,20 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
-import { aiReview, hasUnsupportedHighRiskClaim } from "../lib/ai/enrich";
+import { aiReview, hasUnsupportedHighRiskClaim, looksLikeGarbledAiText } from "../lib/ai/enrich";
 import { createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { safeExternalUrl } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
 import { parseFreshRssItems, parseMinifluxEntries } from "../lib/sources/reader";
 import { configuredFreshnessHours, filterFreshArticles } from "../lib/sources/freshness";
-import { detectCoverageCountries, normalizeCustomKeywords } from "../lib/editorial/context";
+import { detectCoverageCountries, normalizeCustomKeywords, preserveTrendQuery } from "../lib/editorial/context";
 
 test("safeExternalUrl only permits HTTP(S) links", () => {
   assert.equal(safeExternalUrl("https://example.com/news"), "https://example.com/news");
   assert.equal(safeExternalUrl("http://example.com"), "http://example.com/");
   assert.equal(safeExternalUrl("javascript:alert(1)"), null);
   assert.equal(safeExternalUrl("data:text/html,test"), null);
+});
+
+test("garbled AI summaries are detected without rejecting normal bilingual terms", () => {
+  assert.equal(looksLikeGarbledAiText("泽连斯基就地区安全议题发表声明，相关讨论仍在持续。"), false);
+  assert.equal(looksLikeGarbledAiText("????????????????????"), true);
+  assert.equal(looksLikeGarbledAiText("The source returned an untranslated English summary that should be Chinese for this edition."), true);
+  assert.equal(looksLikeGarbledAiText("使用 Transformer 和 RLHF 方法进行训练。"), false);
 });
 
 test("source registry rejects unsafe URLs and duplicate IDs", () => {
@@ -115,6 +122,7 @@ test("report sidecar validates data and restores publication timestamps", () => 
       title: "Title",
       url: "https://example.com/a",
       category: "tech",
+      cnSummary: "旧版中文摘要",
       publishedAt: "2026-07-10T08:00:00.000Z",
       priorityLevel: "P1",
       reasonCodes: ["MULTI_SOURCE_CONFIRMED"],
@@ -134,11 +142,34 @@ test("report sidecar validates data and restores publication timestamps", () => 
       }],
       revision: 1,
     }],
+    qualityReview: {
+      passed: true,
+      summary: "Quality gates passed.",
+      issues: [],
+      suggestions: ["Keep monitoring source diversity."],
+    },
+    runStats: {
+      fetchedSources: 1,
+      successfulSources: 1,
+      sourceSuccessRate: 1,
+      fetchedArticles: 3,
+      dedupedArticles: 2,
+      freshArticles: 1,
+      displayedArticles: 1,
+      aiEnrichedArticles: 1,
+      generatedAt: "2026-07-10T08:00:00.000Z",
+      mode: "fresh",
+    },
   });
   assert.ok(sidecar.articles[0].publishedAt instanceof Date);
   assert.equal(sidecar.articles[0].sourceRefs?.[0]?.publishedAt, undefined);
   assert.ok(sidecar.articles[0].sourceRefs?.[0]?.fetchedAt instanceof Date);
   assert.equal(sidecar.articles[0].priorityLevel, "P1");
+  assert.equal(sidecar.articles[0].summary, "旧版中文摘要");
+  assert.equal(sidecar.qualityReview?.passed, true);
+  assert.equal(sidecar.qualityReview?.summary, "Quality gates passed.");
+  assert.equal(sidecar.runStats?.displayedArticles, 1);
+  assert.equal(sidecar.runStats?.aiEnrichedArticles, 1);
   assert.throws(() => parseReportSidecar({ date: "invalid", articles: [] }));
 });
 
@@ -146,6 +177,34 @@ test("editorial context separates publisher country from covered countries", () 
   assert.deepEqual(detectCoverageCountries("US and Iran discuss a new regional agreement"), ["美国", "伊朗"]);
   assert.deepEqual(normalizeCustomKeywords(" AI Agent,伊朗,AI Agent,这是一个很长的关键词超过限制 "), ["AI Agent", "伊朗", "这是一个很长的关键词超过限制"]);
   assert.equal(normalizeCustomKeywords("a,b,c,d,e,f,g,h,i").length, 8);
+});
+
+test("Google Trends summaries retain the exact original search query", () => {
+  assert.equal(
+    preserveTrendQuery("google-trends-us", "jordan rodgers", "该词条在美国谷歌热搜中成为热门搜索词。"),
+    "搜索词「jordan rodgers」在美国谷歌热搜中成为热门搜索词。",
+  );
+  assert.equal(
+    preserveTrendQuery("google-trends-jp", "tシャツが乾くまで", "tシャツが乾くまで在日本搜索热度上升。"),
+    "tシャツが乾くまで在日本搜索热度上升。",
+  );
+  assert.equal(preserveTrendQuery("github-trending", "project", "项目热度上升。"), "项目热度上升。");
+  assert.equal(
+    preserveTrendQuery("google-trends-gb", "m5 traffic", undefined),
+    "搜索词「m5 traffic」：当前仅确认搜索热度，具体原因待核验。",
+  );
+  assert.equal(
+    preserveTrendQuery("google-trends-us", "AI", "Thailand travel searches increased."),
+    "搜索词「AI」：Thailand travel searches increased.",
+  );
+  assert.equal(
+    preserveTrendQuery("google-trends-us", "AI", undefined, "en"),
+    "Original search query \"AI\": Only the search-interest signal is confirmed; the reason remains unverified.",
+  );
+  assert.equal(
+    preserveTrendQuery("weibo-hot-search", "[新] 歌手排名", "该词条在微博成为新热搜。"),
+    "搜索词「歌手排名」在微博成为新热搜。",
+  );
 });
 
 test("digest candidates prioritize explicit interest matches within a source", () => {

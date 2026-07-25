@@ -21,6 +21,9 @@ import {
   detectCoverageCountries,
   matchCustomKeywords,
   normalizeCustomKeywords,
+  isHotSearchArticle,
+  normalizeHotSearchQuery,
+  preserveTrendQuery,
   politicsAttribution,
 } from "../editorial/context";
 import type { TickerAnalysis } from "../trading/signals";
@@ -86,7 +89,7 @@ const TEXTS_ZH = {
   mdImportance: "重要度",
   archiveLink: "← 历史归档",
   publicPriority: "优先级",
-  legacyImportance: "旧模型评分",
+  legacyImportance: "编辑重要度",
   selectionReasons: "入选依据",
   noReasonRecorded: "旧模型未记录",
   evidenceState: "证据状态",
@@ -103,7 +106,6 @@ const TEXTS_ZH = {
   ruleBaseline: "规则基线",
   generatedAt: "生成时间",
   selectionPrinciples: "查看筛选原则",
-  feedbackEdition: "反馈本期简报",
   runWorkflow: "前往 GitHub Actions 手动运行",
   rolePrimary: "主来源",
   roleOfficial: "官方声明",
@@ -114,7 +116,7 @@ const TEXTS_ZH = {
   legacyEvidenceNote: "旧模型未记录独立来源关系",
   trendEvidenceNote: "热度只代表关注变化，不等于事件事实",
   reviewOnlyNote: "这是内容与输出模型评审样本，不是真实日报，不代表生产数据已经具备这些字段。",
-  legacyRuleBaseline: "旧模型评分 1-10（未记录 v2 证据字段）",
+  legacyRuleBaseline: "编辑重要度 1-10（综合影响、时效与读者相关性；不代表事实可信度）",
   revisionNotice: "版本说明",
 };
 
@@ -168,7 +170,7 @@ const TEXTS_EN: typeof TEXTS_ZH = {
   mdImportance: "Importance",
   archiveLink: "← Archive",
   publicPriority: "Priority",
-  legacyImportance: "Legacy score",
+  legacyImportance: "Editorial importance",
   selectionReasons: "Selection reasons",
   noReasonRecorded: "Not recorded by the legacy model",
   evidenceState: "Evidence",
@@ -185,7 +187,6 @@ const TEXTS_EN: typeof TEXTS_ZH = {
   ruleBaseline: "Rule baseline",
   generatedAt: "Generated at",
   selectionPrinciples: "View selection principles",
-  feedbackEdition: "Send edition feedback",
   runWorkflow: "Run manually in GitHub Actions",
   rolePrimary: "Primary",
   roleOfficial: "Official statement",
@@ -196,7 +197,7 @@ const TEXTS_EN: typeof TEXTS_ZH = {
   legacyEvidenceNote: "The legacy model did not record source independence",
   trendEvidenceNote: "Attention signals do not establish an event as fact",
   reviewOnlyNote: "This is a content and output model review fixture, not a live edition or proof that production data already provides these fields.",
-  legacyRuleBaseline: "Legacy 1-10 scoring (v2 evidence fields were not recorded)",
+  legacyRuleBaseline: "Editorial importance 1-10 (impact, timeliness, and reader relevance; not factual confidence)",
   revisionNotice: "Revision notice",
 };
 
@@ -231,6 +232,9 @@ export type RunStats = {
   sourceSuccessRate: number;
   fetchedArticles: number;
   dedupedArticles: number;
+  displayedArticles?: number;
+  aiEnrichedArticles?: number;
+  suppressedArticles?: number;
   freshnessWindowHours?: number;
   freshArticles?: number;
   staleArticlesRejected?: number;
@@ -658,7 +662,12 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   const url = externalUrl ? escapeHtml(externalUrl) : "";
   const excerpt = a.excerpt ? escapeHtml(a.excerpt) : "";
   // Backwards-compat: old sidecar JSON files may carry `cnSummary` instead.
-  const summaryText = a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary;
+  const summaryText = preserveTrendQuery(
+    a.sourceId,
+    a.title,
+    a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary,
+    REPORT_LOCALE,
+  );
   const summary = summaryText ? escapeHtml(summaryText) : "";
   const importance = Number.isFinite(a.importance) ? Math.max(1, Math.min(10, Math.round(a.importance!))) : null;
   const priorityHtml = a.priorityLevel
@@ -684,7 +693,10 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   // identifies the article → no need for the full English headline.
   // For per-source tabs (GH Trending, Papers, X), show a brief title.
   // When showSource is true, we're inside a merged group → hide the title.
-  const showTitle = !showSource;
+  const showTitle = !showSource || a.category === "trending";
+  const trendQueryHtml = isHotSearchArticle(a.sourceId)
+    ? `<p class="article-search-query"><span>${REPORT_LOCALE === "en" ? "Original search query" : "原始搜索词"}</span><code>${escapeHtml(normalizeHotSearchQuery(a.title))}</code></p>`
+    : "";
   // Build meta line: source name (clickable link) + rest of meta
   let metaHtml = "";
   if (sourceLabel && url) {
@@ -730,7 +742,7 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
 
   return `<article class="article" data-article-url="${url}"${identityAttributes}${tagAttr}>
     ${metaHtml || priorityHtml ? `<p class="article-meta">${metaHtml}${metaHtml && priorityHtml ? " · " : ""}${priorityHtml}</p>` : ""}
-    ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>` : ""}
+    ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>${trendQueryHtml}` : ""}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
     ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel} · ${STR.aiRefined}</span> ` : ""}${summary}</p>` : ""}
     ${publicContext}
@@ -924,9 +936,15 @@ function runStatsText(stats?: RunStats): string {
     : REPORT_LOCALE === "en"
       ? ` → ${stats.freshArticles} fresh (${stats.freshnessWindowHours ?? 72}h)`
       : ` → 新鲜内容 ${stats.freshArticles}（${stats.freshnessWindowHours ?? 72}小时）`;
+  const displayed = stats.displayedArticles === undefined
+    ? ""
+    : ` → ${REPORT_LOCALE === "en" ? "displayed" : "前端精选"} ${stats.displayedArticles}`;
+  const suppressed = stats.suppressedArticles
+    ? ` · ${REPORT_LOCALE === "en" ? "suppressed garbled" : "已屏蔽乱码"} ${stats.suppressedArticles}`
+    : "";
   return REPORT_LOCALE === "en"
-    ? `Sources ${stats.fetchedSources} · Articles ${stats.fetchedArticles} → ${stats.dedupedArticles} after dedup${freshness} · Success ${success} · ${mode}`
-    : `抓取信息源 ${stats.fetchedSources} · 信息 ${stats.fetchedArticles} → 去重后 ${stats.dedupedArticles}${freshness} · 成功率 ${success} · ${mode}`;
+    ? `Sources ${stats.fetchedSources} · Articles ${stats.fetchedArticles} → ${stats.dedupedArticles} after dedup${freshness}${displayed}${suppressed} · Success ${success} · ${mode}`
+    : `抓取信息源 ${stats.fetchedSources} · 信息 ${stats.fetchedArticles} → 去重后 ${stats.dedupedArticles}${freshness}${displayed}${suppressed} · 成功率 ${success} · ${mode}`;
 }
 
 function filterProfileText(profile: FilterProfile): { rules: string; keywords: string } {
@@ -952,13 +970,12 @@ export function renderHtml(
   publicEditionMeta?: PublicEditionMeta,
 ): string {
   const trading = report.trading;
-  const effectiveFilterProfile = filterProfile ?? {
+  const effectiveFilterProfile = {
     baseRules: REPORT_LOCALE === "en" ? BASE_FILTER_RULES_EN : BASE_FILTER_RULES_ZH,
-    customKeywords: [],
-    mode: "base" as const,
+    customKeywords: filterProfile?.customKeywords ?? [],
+    mode: filterProfile?.mode ?? (filterProfile?.customKeywords?.length ? "incremental" as const : "base" as const),
   };
   const filterText = filterProfileText(effectiveFilterProfile);
-  const runEndpoint = process.env.DAILY_RUN_ENDPOINT || "/api/run";
 
   // Split tech raw subgroups: "tech" L1 panel (github-trending + ai-news)
   // vs. "community" L1 panel (cn-community). Keeps the registry simple
@@ -980,6 +997,9 @@ export function renderHtml(
 	    community: sumItems(techCommunitySubs),
 	  };
   const totalStreamItems = counts.trending + counts.tech + counts.politics + counts.finance + counts.community;
+  const visibleStreamArticles = (Object.keys(raw) as Category[]).flatMap((category) =>
+    raw[category].flatMap((sub) => sub.sources.flatMap((source) => source.items)),
+  );
   const renderedSourceCount = new Set(
     (Object.keys(raw) as Category[]).flatMap((category) =>
       raw[category].flatMap((sub) =>
@@ -992,92 +1012,49 @@ export function renderHtml(
     : renderedSourceCount > 0 ? renderedSourceCount : undefined;
   const editionStats = `${totalStreamItems} ${REPORT_LOCALE === "en" ? "items" : "条信息"}${sourceCount === undefined ? "" : ` · ${sourceCount} ${REPORT_LOCALE === "en" ? "sources" : "个来源"}`}`;
   const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
-  const failedHtml = failedSources && failedSources.length > 0
-    ? `<details class="failed-sources">
-    <summary class="failed-sources-heading">${REPORT_LOCALE === "en" ? "Failed Sources" : "抓取失败源"}<span>${failedSources.length}</span></summary>
-    ${failedSources.map((f) => `<div class="failed-source-item">
-      <span class="failed-source-name">${escapeHtml(f.name)}</span>
-      <span class="failed-source-reason" title="${escapeHtml(f.reason)}">${escapeHtml(f.reason.length > 60 ? f.reason.slice(0, 60) + "..." : f.reason)}</span>
-      <button class="refetch-btn" data-source-id="${escapeHtml(f.id)}">${REPORT_LOCALE === "en" ? "Refetch" : "重新抓取"}</button>
-    </div>`).join("")}
-  </details>`
-    : "";
-  const githubRepository = process.env.GITHUB_REPOSITORY ?? "";
-  const actionsUrl = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepository)
-    ? `https://github.com/${githubRepository}/actions/workflows/daily.yml`
-    : "";
   const isPublicReader = process.env.WEB_MODE === "true";
-  const isReviewMode = process.env.CONTENT_MODEL_REVIEW === "true";
-  const ruleBaseline = publicEditionMeta
-    ? `${publicEditionMeta.ruleSetName} · ${publicEditionMeta.ruleSetVersion}`
-    : STR.legacyRuleBaseline;
-  const generatedLabel = runStats?.generatedAt
-    ? new Date(runStats.generatedAt).toLocaleString(REPORT_LOCALE === "en" ? "en-GB" : "zh-CN", {
-      timeZone: getReportTz(),
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-    : date;
-  const feedbackUrl = actionsUrl
-    ? `https://github.com/${githubRepository}/issues/new?${new URLSearchParams({
-      title: `${REPORT_LOCALE === "en" ? "Edition feedback" : "简报反馈"}: ${date}`,
-      body: REPORT_LOCALE === "en"
-        ? "Feedback type: omission / over-compression / priority / source / duplicate / irrelevant\n\nDetails:\n"
-        : "反馈类型：信息遗漏 / 过度压缩 / 重要度不合理 / 来源存疑 / 重复 / 与我无关\n\n具体说明：\n",
-    }).toString()}`
-    : "";
-  const publicDisclosureHtml = `<section class="public-disclosure">
-    <h2>${STR.publicDisclosureTitle}</h2>
-    ${isReviewMode ? `<p><strong>${escapeHtml(STR.reviewOnlyNote)}</strong></p>` : ""}
-    <p>${STR.publicDisclosureNote}</p>
-    <dl>
-      <div><dt>${STR.ruleBaseline}</dt><dd>${escapeHtml(ruleBaseline)}</dd></div>
-      <div><dt>${STR.generatedAt}</dt><dd>${escapeHtml(generatedLabel)}</dd></div>
-      <div><dt>${STR.sourceList}</dt><dd>${sourceCount ?? 0}</dd></div>
-      ${publicEditionMeta?.revisionNotice ? `<div><dt>${STR.revisionNotice}</dt><dd>${escapeHtml(publicEditionMeta.revisionNotice)}</dd></div>` : ""}
+  const qualitySummary = review?.summary || (REPORT_LOCALE === "en"
+    ? "Automated quality review details were not recorded for this edition."
+    : "本期未记录自动质量审核详情，请结合来源成功率和新鲜度指标阅读。");
+  const qualityState = review
+    ? (review.passed ? (REPORT_LOCALE === "en" ? "Sample passed" : "抽检通过") : (REPORT_LOCALE === "en" ? "Sample needs review" : "抽检需复核"))
+    : (REPORT_LOCALE === "en" ? "Not recorded" : "未记录");
+  const fetchedArticleCount = runStats?.fetchedArticles ?? totalStreamItems;
+  const dedupedArticleCount = runStats?.dedupedArticles ?? fetchedArticleCount;
+  const eligibleArticleCount = runStats?.freshArticles ?? totalStreamItems;
+  const displayedArticleCount = runStats?.displayedArticles ?? totalStreamItems;
+  const aiEnrichedArticleCount = runStats?.aiEnrichedArticles
+    ?? visibleStreamArticles.filter((article) => article.displayTitle && article.summary).length;
+  const suppressedArticleCount = runStats?.suppressedArticles ?? 0;
+  const freshnessRejectedCount = Math.max(0, dedupedArticleCount - eligibleArticleCount);
+  const sourceSuccessDetail = runStats
+    ? `${runStats.successfulSources}/${runStats.fetchedSources} · ${(runStats.sourceSuccessRate * 100).toFixed(1)}%`
+    : (REPORT_LOCALE === "en" ? "Not recorded" : "未记录");
+  const qualityAnalysisHtml = `<section class="edition-quality" data-testid="edition-quality">
+    <div class="edition-quality-head"><h2>${REPORT_LOCALE === "en" ? "Current edition quality analysis" : "当前日报质量分析"}</h2><span class="quality-state${review?.passed ? " passed" : ""}">${qualityState}</span></div>
+    <p>${escapeHtml(qualitySummary)}</p>
+    <dl class="quality-pipeline">
+      <div class="quality-stage"><span class="quality-stage-index">1</span><div><dt>${REPORT_LOCALE === "en" ? "Fetched" : "抓取入库"}</dt><dd>${fetchedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? "Sources succeeded" : "来源成功"} ${sourceSuccessDetail}</p></div></div>
+      <div class="quality-stage"><span class="quality-stage-index">2</span><div><dt>${REPORT_LOCALE === "en" ? "Eligible pool" : "初筛候选"}</dt><dd>${eligibleArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Deduped ${dedupedArticleCount}; freshness rejected ${freshnessRejectedCount}` : `去重后 ${dedupedArticleCount} 条 · 时效筛除 ${freshnessRejectedCount} 条`}</p></div></div>
+      <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Selected by the public-brief rules; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? `; garbled items suppressed ${suppressedArticleCount}` : ""}` : `按公共日报规则选入 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? ` · 已屏蔽乱码 ${suppressedArticleCount} 条` : ""}`}</p></div></div>
     </dl>
-    <div class="public-disclosure-actions">
-      <details><summary>${STR.selectionPrinciples}</summary><p>${escapeHtml(filterText.rules)}${filterText.keywords ? ` · ${escapeHtml(filterText.keywords)}` : ""}</p></details>
-      ${isPublicReader && actionsUrl ? `<a href="${escapeHtml(actionsUrl)}" target="_blank" rel="noopener noreferrer">${STR.runWorkflow}</a>` : ""}
-      ${feedbackUrl ? `<a href="${escapeHtml(feedbackUrl)}" target="_blank" rel="noopener noreferrer">${STR.feedbackEdition}</a>` : ""}
-    </div>
+    <p class="quality-scope-note">${REPORT_LOCALE === "en" ? "AI enrichment applies to displayed items. The publication quality review is a category sample, not full factual verification." : "AI 逐条精炼只覆盖前端精选内容；发布前质量审核为分栏抽检，不代表对全部候选逐条事实核验。"}</p>
   </section>`;
-  const operatorPanelsHtml = isPublicReader ? "" : `<section class="run-console" data-actions-url="${escapeHtml(actionsUrl)}" data-github-repository="${escapeHtml(githubRepository)}" data-run-endpoint="${escapeHtml(runEndpoint)}">
-    <div class="run-console-head">
-      <button class="run-button" id="runDailyButton" type="button" title="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}" aria-label="${REPORT_LOCALE === "en" ? "Run daily brief" : "运行日报"}">▶</button>
-      <div class="run-status-copy">
-        <p class="run-status-label" id="runStatusLabel">${REPORT_LOCALE === "en" ? "Ready" : "等待运行"}</p>
-        <p class="run-status-detail" id="runStatusDetail">${REPORT_LOCALE === "en" ? "Local service runs directly; Pages uses a secure remote endpoint" : "本地服务直接运行；Pages 使用安全远程启动端点"}</p>
+  const readerToolsHtml = `<section class="reader-tools" data-testid="reader-tools">
+    <div class="selection-principles">
+      <h2>${REPORT_LOCALE === "en" ? "Selection principles" : "筛选原则"}</h2>
+      <div class="principle-grid">
+        <div><h3>${REPORT_LOCALE === "en" ? "Public brief" : "公共日报"}</h3><p>${escapeHtml(filterText.rules)}</p></div>
+        <div><h3>${REPORT_LOCALE === "en" ? "Personalized brief" : "用户个性化"}</h3><p>${REPORT_LOCALE === "en" ? "Your keywords add to the public rules. They do not replace source, freshness, or quality gates." : "用户提交的关注词只在公共规则之上做增量筛选，不替代来源、时效和质量门禁。"}</p></div>
       </div>
-      <span class="run-progress-value" id="runProgressValue">0%</span>
     </div>
-    <div class="run-progress-track" role="progressbar" aria-label="${REPORT_LOCALE === "en" ? "Run progress" : "运行进度"}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-      <div class="run-progress-bar" id="runProgressBar"></div>
-    </div>
-    <p class="run-stats" id="runStats">${escapeHtml(runStatsText(runStats))}</p>
-    <pre class="run-log" id="runLog" aria-live="polite"></pre>
-  </section>
-
-  <section class="filter-console" id="filterConsole">
-    <div class="filter-console-head">
-      <span class="filter-console-title">${REPORT_LOCALE === "en" ? "AI selection profile" : "本次 AI 筛选标准"}</span>
-      <button class="filter-custom-button" id="customFilterToggle" type="button">${REPORT_LOCALE === "en" ? "Customize" : "自定义筛选"}</button>
-    </div>
-    <p class="filter-console-line"><strong>${REPORT_LOCALE === "en" ? "Base rules" : "基础规则"}：</strong><span id="filterBaseRules">${escapeHtml(filterText.rules)}</span></p>
-    <p class="filter-console-line"><strong>${REPORT_LOCALE === "en" ? "Incremental keywords" : "增量关键词"}：</strong><span id="filterKeywords">${escapeHtml(filterText.keywords)}</span></p>
-    <form class="filter-custom-form" id="customFilterForm" hidden>
-      <label for="customKeywordsInput">${REPORT_LOCALE === "en" ? "Add up to 8 keywords" : "增加兴趣关键词（最多 8 个，合计不超过 120 字）"}</label>
-      <input id="customKeywordsInput" name="keywords" maxlength="120" autocomplete="off" placeholder="${REPORT_LOCALE === "en" ? "e.g. AI agents, Iran, NVIDIA" : "例如：AI Agent、伊朗、英伟达"}">
-      <div class="filter-custom-actions"><span id="customKeywordHint">${REPORT_LOCALE === "en" ? "Keywords are additive and affect the next run only." : "关键词只做增量筛选，不会替换基础规则。"}</span><button type="submit">${REPORT_LOCALE === "en" ? "Apply and run" : "应用并运行"}</button></div>
+    <form class="reader-keyword-form" id="readerKeywordForm">
+      <label for="readerKeywordsInput">${REPORT_LOCALE === "en" ? "My selection keywords" : "我的筛选原则词汇"}</label>
+      <div class="reader-keyword-row"><input id="readerKeywordsInput" maxlength="120" autocomplete="off" placeholder="${REPORT_LOCALE === "en" ? "Suggested: AI agents, robotics, semiconductors, new energy" : "建议词：AI Agent、机器人、半导体、新能源、出海"}" value="${escapeHtml(effectiveFilterProfile.customKeywords.join("、"))}"><button type="submit">${REPORT_LOCALE === "en" ? "Save" : "保存词汇"}</button></div>
+      <p id="readerKeywordHint">${REPORT_LOCALE === "en" ? "Choose current topics from Hot Tags below. Avoid terms so personal that no story can match." : "建议从下方热点标签选择词汇；尽量避免过度个性化、当天无内容可匹配的词。"}</p>
     </form>
-  </section>
-
-  ${failedHtml}
-  ${reviewHtml(review)}`;
+  </section>`;
+  const reviewDetailsHtml = reviewHtml(review);
 
   return `<!doctype html>
 <html lang="${REPORT_LOCALE === "en" ? "en" : "zh-CN"}">
@@ -1112,6 +1089,8 @@ export function renderHtml(
     --cat-politics: #7c4dff;
     --cat-trading: #e06b00;
     --cat-community: #d13c8a;
+    --section-accent: var(--cat-trending);
+    --section-wash: #fff0ef;
     --hero-grad-from: #eaf3ff;
     --hero-grad-to: #f8fbff;
     --shadow-sm: 0 1px 2px rgba(11,19,43,0.05);
@@ -1144,6 +1123,7 @@ export function renderHtml(
       --cat-politics: #b99cff;
       --cat-trading: #ffac5c;
       --cat-community: #ff82c2;
+      --section-wash: #1b2230;
       --hero-grad-from: #172b45;
       --hero-grad-to: #0f1d31;
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.22);
@@ -1155,14 +1135,21 @@ export function renderHtml(
   html { scroll-behavior: smooth; font-size: 16px; }
   body {
     margin: 0;
-    background: var(--bg);
+    background: color-mix(in srgb, var(--bg) 94%, var(--section-wash));
     color: var(--fg);
     font-family: "Cabinet Grotesk", "Segoe UI Variable", -apple-system,
       BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     line-height: 1.62;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.45s ease;
   }
+  body[data-active-category="trending"] { --section-accent: var(--cat-trending); --section-wash: #fff0ef; }
+  body[data-active-category="tech"] { --section-accent: var(--cat-tech); --section-wash: #edf5ff; }
+  body[data-active-category="trading"] { --section-accent: var(--cat-trading); --section-wash: #fff4e8; }
+  body[data-active-category="politics"] { --section-accent: var(--cat-politics); --section-wash: #f5f0ff; }
+  body[data-active-category="finance"] { --section-accent: var(--cat-finance); --section-wash: #ebfaf5; }
+  body[data-active-category="community"] { --section-accent: var(--cat-community); --section-wash: #fff0f8; }
   main {
     max-width: 1180px;
     margin: 0 auto;
@@ -1528,6 +1515,22 @@ export function renderHtml(
   }
   .article-title a { color: var(--fg); text-decoration: none; transition: color 0.15s; }
   .article-title a:hover { color: var(--link); }
+  .article-search-query {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: -0.05rem 0 0.35rem;
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+  .article-search-query span { font-weight: 700; }
+  .article-search-query code {
+    overflow-wrap: anywhere;
+    color: var(--fg-soft);
+    font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    font-size: 0.72rem;
+  }
   .article-meta { color: var(--muted); font-size: 0.74rem; margin: 0 0 0.3rem; }
   .article-importance {
     display: inline-flex;
@@ -1577,21 +1580,33 @@ export function renderHtml(
   .article-source-list > span { display: flex; flex-wrap: wrap; gap: 0.3rem 0.7rem; min-width: 0; }
   .article-source-list a { color: var(--link); overflow-wrap: anywhere; text-underline-offset: 0.15rem; }
   .article-revision { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.65rem; }
-  .public-disclosure {
-    margin: 0.75rem 0 1rem;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid var(--rule);
-  }
-  .public-disclosure h2 { margin: 0; font-size: 0.82rem; }
-  .public-disclosure > p { margin: 0.38rem 0 0; color: var(--fg-soft); font-size: 0.72rem; line-height: 1.6; }
-  .public-disclosure dl { display: flex; flex-wrap: wrap; gap: 0.55rem 1.25rem; margin: 0.65rem 0 0; }
-  .public-disclosure dl div { display: grid; gap: 0.08rem; }
-  .public-disclosure dt { color: var(--muted); font-size: 0.62rem; }
-  .public-disclosure dd { margin: 0; color: var(--fg); font-size: 0.7rem; font-weight: 700; }
-  .public-disclosure-actions { display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; margin-top: 0.65rem; }
-  .public-disclosure-actions summary,
-  .public-disclosure-actions a { color: var(--link); cursor: pointer; font-size: 0.7rem; text-underline-offset: 0.15rem; }
-  .public-disclosure-actions details p { max-width: 58rem; margin: 0.4rem 0 0; color: var(--muted); line-height: 1.6; }
+  .edition-quality { margin: 0.75rem 0 0; padding: 0.75rem 0; border-bottom: 1px solid var(--rule); }
+  .edition-quality-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+  .edition-quality h2, .selection-principles h2 { margin: 0; font-size: 0.82rem; }
+  .edition-quality > p { margin: 0.4rem 0 0; color: var(--fg-soft); font-size: 0.72rem; line-height: 1.6; }
+  .edition-quality dl { margin: 0.65rem 0 0; }
+  .quality-pipeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+  .quality-stage { display: grid; grid-template-columns: 1.35rem minmax(0, 1fr); gap: 0.4rem; padding: 0 0.65rem; border-left: 1px solid var(--rule); }
+  .quality-stage:first-child { padding-left: 0; border-left: 0; }
+  .quality-stage-index { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--section-accent); color: var(--accent-fg); font-size: 0.62rem; font-weight: 800; }
+  .edition-quality dt { color: var(--muted); font-size: 0.62rem; }
+  .edition-quality dd { margin: 0.05rem 0 0; color: var(--fg); font-size: 0.84rem; font-weight: 800; }
+  .quality-stage p { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.62rem; line-height: 1.45; }
+  .edition-quality .quality-scope-note { margin-top: 0.65rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); font-size: 0.64rem; }
+  .quality-state { flex: 0 0 auto; color: #8a5a00; font-size: 0.66rem; font-weight: 700; }
+  .quality-state.passed { color: #176b45; }
+  .reader-tools { padding: 0.2rem 0 0.8rem; }
+  .principle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.55rem; }
+  .principle-grid > div { padding: 0.65rem 0.7rem; border-left: 3px solid var(--section-accent); background: color-mix(in srgb, var(--bg-elevated) 88%, var(--section-wash)); }
+  .principle-grid h3 { margin: 0; font-size: 0.72rem; color: var(--fg); }
+  .principle-grid p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.68rem; line-height: 1.55; }
+  .reader-keyword-form { margin-top: 0.8rem; }
+  .reader-keyword-form label { display: block; margin-bottom: 0.3rem; color: var(--fg-soft); font-size: 0.7rem; font-weight: 700; }
+  .reader-keyword-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; }
+  .reader-keyword-row input { min-width: 0; border: 1px solid var(--rule); border-radius: 0.35rem; padding: 0.52rem 0.6rem; background: var(--bg-elevated); color: var(--fg); font: inherit; font-size: 0.72rem; }
+  .reader-keyword-row button { border: 0; border-radius: 0.35rem; padding: 0.52rem 0.72rem; background: var(--accent); color: var(--accent-fg); font: inherit; font-size: 0.7rem; font-weight: 700; cursor: pointer; }
+  .reader-keyword-form > p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.66rem; line-height: 1.55; }
+  .reader-keyword-form.saved .reader-keyword-row input { border-color: #176b45; }
   .run-console {
     margin: 0.85rem 0 1.25rem;
     padding: 0.8rem 0;
@@ -2610,7 +2625,8 @@ export function renderHtml(
 	    margin-top: 0.55rem;
 	    padding: 0.7rem 0.75rem;
 	    background: var(--bg-elevated);
-	    border: 1px solid var(--rule);
+	    border: 1px solid color-mix(in srgb, var(--section-accent) 45%, var(--rule));
+	    border-left: 3px solid var(--section-accent);
 	    border-radius: var(--radius);
 	    box-shadow: var(--shadow-sm);
 	  }
@@ -2638,7 +2654,7 @@ export function renderHtml(
 	    background: var(--card);
 	    border-radius: 999px;
 	  }
-	  .reading-progress span { display: block; width: 0; height: 100%; background: var(--link); transition: width 0.18s ease; }
+	  .reading-progress span { display: block; width: 0; height: 100%; background: var(--section-accent); transition: width 0.18s ease, background-color 0.35s ease; }
 	  .update-available {
 	    width: 100%;
 	    margin-top: 0.55rem;
@@ -2662,7 +2678,15 @@ export function renderHtml(
 	    border: 1px solid var(--rule);
 	    border-radius: var(--radius);
 	    box-shadow: var(--shadow-sm);
+	    border-top: 3px solid var(--section-color, var(--section-accent));
 	  }
+	  .stream-section[data-panel="trending"] { --section-color: var(--cat-trending); }
+	  .stream-section[data-panel="tech"] { --section-color: var(--cat-tech); }
+	  .stream-section[data-panel="trading"] { --section-color: var(--cat-trading); }
+	  .stream-section[data-panel="politics"] { --section-color: var(--cat-politics); }
+	  .stream-section[data-panel="finance"] { --section-color: var(--cat-finance); }
+	  .stream-section[data-panel="community"] { --section-color: var(--cat-community); }
+	  .stream-section .stream-category-heading { border-bottom-color: color-mix(in srgb, var(--section-color) 58%, var(--rule)); }
 	  .stream-category-heading,
 	  .stream-sub-heading,
 	  .stream-source-heading {
@@ -2766,6 +2790,11 @@ export function renderHtml(
 	  }
 
 	  @media (max-width: 640px) {
+	    .quality-pipeline { grid-template-columns: 1fr; gap: 0.55rem; }
+	    .quality-stage, .quality-stage:first-child { padding: 0 0 0.55rem; border-left: 0; border-bottom: 1px solid var(--rule); }
+	    .quality-stage:last-child { padding-bottom: 0; border-bottom: 0; }
+	    .principle-grid { grid-template-columns: 1fr; }
+	    .reader-keyword-row { grid-template-columns: 1fr; }
 	    main { padding: 0.75rem 1rem 2.5rem; }
 	    header.report-header {
 	      grid-template-columns: minmax(0, 1fr);
@@ -2844,7 +2873,7 @@ export function renderHtml(
 	  }
 	</style>
 </head>
-<body>
+<body data-active-category="${raw.trending.length > 0 ? "trending" : "tech"}">
 <main>
   <header class="report-header">
       <span class="eyebrow">${STR.siteTitle}</span>
@@ -2855,13 +2884,15 @@ export function renderHtml(
 
   <details class="brief-meta"${isPublicReader ? " open" : ""}>
     <summary class="brief-meta-summary">
-      <span>${REPORT_LOCALE === "en" ? "About this edition" : "本期说明"}</span>
+      <span>${REPORT_LOCALE === "en" ? "Current edition quality analysis" : "当前日报质量分析"}</span>
       <span>${editionStats}</span>
     </summary>
     <div class="brief-meta-body">
-  ${publicDisclosureHtml}
+  ${qualityAnalysisHtml}
 
-  ${operatorPanelsHtml}
+  ${readerToolsHtml}
+
+  ${reviewDetailsHtml}
 
   ${tagCloudHtml}
 
@@ -2917,6 +2948,56 @@ export function renderHtml(
 </main>
 <script>
   (function () {
+    var form = document.getElementById('readerKeywordForm');
+    var input = document.getElementById('readerKeywordsInput');
+    var hint = document.getElementById('readerKeywordHint');
+    if (!form || !input || !hint) return;
+
+    function normalizeReaderKeywords(raw) {
+      var values = String(raw || '').split(/[\\n,，、;；|]+/);
+      var result = [];
+      var total = 0;
+      values.forEach(function (value) {
+        var cleaned = value.replace(/\\s+/g, ' ').trim().slice(0, 24);
+        var key = cleaned.toLocaleLowerCase();
+        if (!cleaned || result.some(function (item) { return item.toLocaleLowerCase() === key; })) return;
+        if (total + cleaned.length > 120 || result.length >= 8) return;
+        result.push(cleaned);
+        total += cleaned.length;
+      });
+      return result;
+    }
+
+    function saveKeywords() {
+      var keywords = normalizeReaderKeywords(input.value);
+      input.value = keywords.join('、');
+      try { localStorage.setItem('dailybrief.readerKeywords', input.value); } catch (_) {}
+      form.classList.add('saved');
+      hint.textContent = keywords.length
+        ? '${REPORT_LOCALE === "en" ? "Saved on this device. These keywords will be used when personalized briefs are connected." : "已自动保存在本机。接入个性化日报后，将按这些词进行增量筛选。"}'
+        : '${REPORT_LOCALE === "en" ? "No custom keywords saved; the public brief rules remain active." : "未保存自定义词，将继续使用公共日报筛选原则。"}';
+      window.setTimeout(function () { form.classList.remove('saved'); }, 1600);
+      return keywords;
+    }
+
+    form.addEventListener('submit', function (event) { event.preventDefault(); saveKeywords(); });
+    input.addEventListener('change', saveKeywords);
+    document.addEventListener('dailybrief:tag-suggest', function (event) {
+      var tag = event.detail && event.detail.tag ? String(event.detail.tag) : '';
+      if (!tag) return;
+      var keywords = normalizeReaderKeywords(input.value);
+      if (!keywords.some(function (item) { return item.toLocaleLowerCase() === tag.toLocaleLowerCase(); })) keywords.push(tag);
+      input.value = normalizeReaderKeywords(keywords.join('、')).join('、');
+      saveKeywords();
+    });
+    try {
+      var savedKeywords = localStorage.getItem('dailybrief.readerKeywords');
+      if (savedKeywords) input.value = normalizeReaderKeywords(savedKeywords).join('、');
+    } catch (_) {}
+
+  })();
+
+  (function () {
     var consoleEl = document.querySelector('.run-console');
     var button = document.getElementById('runDailyButton');
     var label = document.getElementById('runStatusLabel');
@@ -2966,7 +3047,8 @@ export function renderHtml(
       if (!runStats) return '';
       var rate = (Number(runStats.sourceSuccessRate || 0) * 100).toFixed(1) + '%';
       var freshness = runStats.freshArticles === undefined ? '' : ' → ${REPORT_LOCALE === "en" ? "fresh" : "新鲜内容"} ' + runStats.freshArticles + ' (' + (runStats.freshnessWindowHours || 72) + 'h)';
-      return '${REPORT_LOCALE === "en" ? "Sources" : "抓取信息源"} ' + (runStats.fetchedSources || 0) + ' · ${REPORT_LOCALE === "en" ? "Articles" : "信息"} ' + (runStats.fetchedArticles || 0) + ' → ${REPORT_LOCALE === "en" ? "deduped" : "去重后"} ' + (runStats.dedupedArticles || 0) + freshness + ' · ${REPORT_LOCALE === "en" ? "Success" : "成功率"} ' + rate;
+      var displayed = runStats.displayedArticles === undefined ? '' : ' → ${REPORT_LOCALE === "en" ? "displayed" : "前端精选"} ' + runStats.displayedArticles;
+      return '${REPORT_LOCALE === "en" ? "Sources" : "抓取信息源"} ' + (runStats.fetchedSources || 0) + ' · ${REPORT_LOCALE === "en" ? "Articles" : "信息"} ' + (runStats.fetchedArticles || 0) + ' → ${REPORT_LOCALE === "en" ? "deduped" : "去重后"} ' + (runStats.dedupedArticles || 0) + freshness + displayed + ' · ${REPORT_LOCALE === "en" ? "Success" : "成功率"} ' + rate;
     }
 
     function renderStatus(state) {
@@ -3228,6 +3310,7 @@ export function renderHtml(
       var categoryId = section ? section.dataset.panel || '' : '';
       if (categoryId && categoryId !== activeCategoryId) {
         activeCategoryId = categoryId;
+        document.body.dataset.activeCategory = categoryId;
         var activeCategoryTab = document.querySelector('.tabs > .tab[data-tab="' + categoryId + '"]');
         if (activeCategoryTab && window.innerWidth <= 640) {
           var tabStrip = activeCategoryTab.parentElement;
@@ -3374,6 +3457,7 @@ export function renderHtml(
         return;
       }
       activeTag = tag;
+      document.dispatchEvent(new CustomEvent('dailybrief:tag-suggest', { detail: { tag: tag } }));
       document.querySelectorAll('.tag-cloud-chip').forEach(function (c) {
         c.classList.toggle('active-tag', c.dataset.tag === tag);
       });

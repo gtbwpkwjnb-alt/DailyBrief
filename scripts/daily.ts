@@ -26,6 +26,7 @@ import {
   enrichContentTags,
   consolidatedEnrich,
   aiReview,
+  looksLikeGarbledAiText,
   type EnrichInput,
   type ReviewResult,
 } from "../lib/ai/enrich";
@@ -44,6 +45,8 @@ import {
   detectCoverageCountries,
   matchCustomKeywords,
   normalizeCustomKeywords,
+  isHotSearchArticle,
+  preserveTrendQuery,
 } from "../lib/editorial/context";
 import { analyzeWatchlist } from "../lib/trading/runner";
 import { fetchCryptoFearGreed } from "../lib/trading/fear-greed";
@@ -886,6 +889,8 @@ async function main() {
   // the budget on fetch-order items while visible cards remain untranslated.
   const visibleRaw = groupRaw(articles, sources, { customKeywords });
   const visibleByCategory = new Map<string, ArticleInput[]>();
+  const suppressedSummaryIssues: string[] = [];
+  const suppressedUrls = new Set<string>();
   for (const category of Object.keys(visibleRaw) as Array<keyof typeof visibleRaw>) {
     const seen = new Set<string>();
     const visible = visibleRaw[category]
@@ -920,9 +925,20 @@ async function main() {
         )
       : items;
     if (targets.length === 0) {
-      const enriched = items.filter((article) => article.displayTitle && article.summary).length;
-      console.log(`[daily]  ${cfg.key.padEnd(12)} cache complete ${enriched}/${items.length}`);
-      return { key: cfg.key, requested: items.length, enriched };
+      for (const article of items) {
+        if (isHotSearchArticle(article.sourceId)) {
+          article.summary = preserveTrendQuery(article.sourceId, article.title, article.summary);
+        }
+      }
+      const malformed = items.filter((article) => !article.displayTitle || !article.summary || looksLikeGarbledAiText(article.summary));
+      if (malformed.length > 0) {
+        malformed.forEach((article) => suppressedUrls.add(article.url));
+        suppressedSummaryIssues.push(`${cfg.label}屏蔽 ${malformed.length} 条摘要缺失或疑似乱码内容，已跳过并继续发布其它信息。`);
+        visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
+      }
+      const publishable = items.filter((article) => !suppressedUrls.has(article.url));
+      console.log(`[daily]  ${cfg.key.padEnd(12)} cache complete ${publishable.length}/${items.length}`);
+      return { key: cfg.key, requested: publishable.length, enriched: publishable.length };
     }
     const t1 = Date.now();
     const results = await consolidatedEnrich(
@@ -952,9 +968,28 @@ async function main() {
         matched++;
       }
     }
-    const enriched = items.filter((article) => article.displayTitle && article.summary).length;
-    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${items.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
-    return { key: cfg.key, requested: items.length, enriched };
+    for (const article of items) {
+      if (isHotSearchArticle(article.sourceId)) {
+        article.summary = preserveTrendQuery(article.sourceId, article.title, article.summary);
+      }
+    }
+    const malformed = items.filter((article) => {
+      if (!article.displayTitle || !article.summary) return true;
+      return looksLikeGarbledAiText(article.summary);
+    });
+    if (malformed.length > 0) {
+      for (const article of malformed) {
+        suppressedUrls.add(article.url);
+      }
+      suppressedSummaryIssues.push(
+        `${cfg.label}屏蔽 ${malformed.length} 条摘要缺失或疑似乱码内容，已跳过并继续发布其它信息。`,
+      );
+      visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
+    }
+    const publishable = items.filter((article) => !suppressedUrls.has(article.url));
+    const enriched = publishable.filter((article) => article.displayTitle && article.summary).length;
+    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${publishable.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
+    return { key: cfg.key, requested: publishable.length, enriched };
   }));
   const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 1);
   for (const category of enrichmentHealth) {
@@ -965,6 +1000,17 @@ async function main() {
       throw new Error(`${category.key} enrichment coverage ${(coverage * 100).toFixed(1)}% is below MIN_ENRICHMENT_COVERAGE ${(minEnrichmentCoverage * 100).toFixed(1)}%`);
     }
   }
+  if (suppressedUrls.size > 0) {
+    const retained = articles.filter((article) => !suppressedUrls.has(article.url));
+    articles.length = 0;
+    articles.push(...retained);
+  }
+  runStats.suppressedArticles = suppressedUrls.size;
+  runStats.displayedArticles = Array.from(visibleByCategory.values())
+    .reduce((total, items) => total + items.length, 0);
+  runStats.aiEnrichedArticles = Array.from(visibleByCategory.values())
+    .flat()
+    .filter((article) => article.displayTitle && article.summary).length;
   console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
   // Phase 5: Trading signals (optional, non-fatal)
@@ -1023,6 +1069,11 @@ async function main() {
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);
+  if (suppressedSummaryIssues.length > 0) {
+    review.issues.push(...suppressedSummaryIssues);
+    review.suggestions.push("乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。");
+    review.summary = `${review.summary} ${suppressedSummaryIssues.join(" ")}`.trim();
+  }
   console.log(`[daily] AI review done in ${((Date.now() - reviewT0) / 1000).toFixed(1)}s — ${review.passed ? "✅ PASSED" : "⚠️ ISSUES FOUND"}`);
   if (review.issues.length > 0) {
     for (const issue of review.issues) console.warn(`  [review] ${issue}`);
@@ -1056,7 +1107,19 @@ async function main() {
   fs.writeFileSync(`${base}.json`, JSON.stringify(report, null, 2), "utf8");
   fs.writeFileSync(
     `${base}-articles.json`,
-    JSON.stringify({ date, articles, failedSources, runStats, filterProfile }, null, 2),
+    JSON.stringify({
+      date,
+      articles,
+      failedSources,
+      runStats,
+      filterProfile,
+      qualityReview: {
+        passed: review.passed,
+        summary: review.summary,
+        issues: review.issues,
+        suggestions: review.suggestions,
+      },
+    }, null, 2),
     "utf8",
   );
   fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review, runStats, filterProfile), "utf8");

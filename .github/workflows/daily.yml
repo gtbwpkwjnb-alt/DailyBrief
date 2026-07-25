@@ -12,20 +12,20 @@ name: Daily Brief
 #            LLM_MODEL       e.g. claude-sonnet-4-6 / gpt-4o-mini       (backend default if unset)
 #            REPORT_LOCALE   zh | en                                    (default: zh)
 #            REPORT_TZ       IANA tz, e.g. Asia/Shanghai / UTC          (default: UTC in CI)
-#            REPORT_HOUR     trigger hour(s) in REPORT_TZ, comma-list   (default: 8 — 08:00)
-#                            examples: "8" / "8,18" / "0,6,12,18"
+#            REPORT_HOUR     trigger hour(s) in REPORT_TZ, comma-list   (default: 6,18 — 06:00/18:00)
+#                            examples: "6,18" / "8" / "0,6,12,18"
 #            REPORT_DAYS     day-of-week filter (cron-style 0-6 SUN=0)  (default: * — every day)
 #                            examples: "*" / "1-5" (weekdays) / "1,3,5" (MWF)
 #   4. Trigger once manually from Actions tab to seed gh-pages.
 #
-# Schedule: cron probes twice per hour because GitHub Actions cron is UTC-only.
+# Schedule: UTC probes for 06:00 and 18:00 Asia/Shanghai; each target hour has
+# two probes so a delayed GitHub cron event can still pass the time gate.
 # A "gate" job checks REPORT_HOUR in REPORT_TZ and only allows the build when
 # they match. workflow_dispatch always bypasses the gate.
 
 on:
   schedule:
-    - cron: "7 * * * *"
-    - cron: "37 * * * *"
+    - cron: "7,37 10,22 * * *"
   workflow_dispatch:
 
 permissions:
@@ -58,7 +58,7 @@ jobs:
             exit 0
           fi
           TZ_VAL="${REPORT_TZ:-UTC}"
-          HOURS_VAL="${REPORT_HOUR:-8}"
+          HOURS_VAL="${REPORT_HOUR:-6,18}"
           DAYS_VAL="${REPORT_DAYS:-*}"
           NOW_HOUR=$(TZ="$TZ_VAL" date +%-H)
           NOW_DOW=$(TZ="$TZ_VAL" date +%w)

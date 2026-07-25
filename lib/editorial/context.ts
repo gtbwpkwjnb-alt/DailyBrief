@@ -5,10 +5,45 @@ export const MAX_CUSTOM_KEYWORD_LENGTH = 24;
 export const MAX_CUSTOM_KEYWORD_TOTAL = 120;
 
 export const BASE_FILTER_RULES_ZH =
-  "覆盖热搜、技术、财经、国际时政；优先时效性、事实密度、来源多样性和重要度；同一事件去重；摘要保留主体、地点、时间、数字和原文可验证信息；国际时政同时标注媒体所属国与文章涉及国。";
+  "对已启用信息源的抓取结果按 URL 和规范化标题去重；仅保留 72 小时内内容及实时榜单；剔除已禁用来源、国际时政中的体育内容和社区离题内容；再按栏目配额、来源均衡、源内热度或发布时间选入公共日报。AI 只对选入条目做标题、摘要、标签和编辑重要度精炼，不参与本轮候选价值筛选。";
 
 export const BASE_FILTER_RULES_EN =
-  "Cover trends, technology, finance, and world news; prioritize timeliness, factual density, source diversity, and importance; deduplicate the same event; retain verifiable people, places, dates, and numbers; label both publisher country and countries covered in world-news items.";
+  "Deduplicate enabled-source results by URL and normalized title; keep items from the last 72 hours plus live rankings; exclude disabled sources, sports from world news, and off-topic community posts; then select the public brief by section quotas, source balance, source ranking, or publication time. AI refines titles, summaries, tags, and editorial importance only after selection; it does not perform candidate value selection in this run.";
+
+export function isGoogleTrendsArticle(sourceId: string): boolean {
+  return sourceId.startsWith("google-trends-");
+}
+
+export function isHotSearchArticle(sourceId: string): boolean {
+  return isGoogleTrendsArticle(sourceId) || sourceId === "weibo-hot-search" || sourceId === "baidu-hot-search";
+}
+
+export function normalizeHotSearchQuery(title: string): string {
+  return title.trim().replace(/^\[(?:新|荐|沸|热|爆)\]\s*/, "");
+}
+
+/** Keep the exact query visible even when an AI summary uses a generic phrase such as "该词条". */
+export function preserveTrendQuery(
+  sourceId: string,
+  title: string,
+  summary: string | undefined,
+  locale: "zh" | "en" = "zh",
+): string {
+  if (!isHotSearchArticle(sourceId) || !title.trim()) return summary ?? "";
+  const query = normalizeHotSearchQuery(title);
+  const current = (summary ?? "").trim();
+  const normalizedQuery = query.toLocaleLowerCase();
+  const containsExactQuery = /^[\x00-\x7F]+$/.test(query)
+    ? new RegExp(`(^|[^a-z0-9])${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(current)
+    : current.toLocaleLowerCase().includes(normalizedQuery);
+  if (containsExactQuery) return current;
+  if (locale === "zh" && current.includes("该词条")) {
+    return current.replace("该词条", `搜索词「${query}」`);
+  }
+  return locale === "en"
+    ? `Original search query "${query}": ${current || "Only the search-interest signal is confirmed; the reason remains unverified."}`
+    : `搜索词「${query}」：${current || "当前仅确认搜索热度，具体原因待核验。"}`;
+}
 
 const COUNTRY_ALIASES: Array<[string, string[]]> = [
   ["美国", ["美国", "美方", "美军", "华盛顿", "united states", "u.s.", "us", "america", "american"]],

@@ -34,13 +34,15 @@ test("report renders a usable tech panel without unsafe links", async ({ page })
   await expect(page.locator("a[href^='javascript:']")).toHaveCount(0);
   await expect(page.locator(".article-title")).toContainText(article.displayTitle!);
   await expect(page.locator(".article-excerpt")).toHaveCount(0);
-  await expect(page.locator(".article-legacy-score")).toContainText("旧模型评分 8/10");
+  await expect(page.locator(".article-legacy-score")).toContainText("编辑重要度 8/10");
   await expect(page.locator(".article-public-context")).toHaveCount(0);
   await expect(page.locator(".brief-meta-summary")).toBeVisible();
   await expect(page.locator(".brief-meta-summary")).toContainText("1 个来源");
   await expect(page.locator(".brief-meta-summary")).not.toContainText("0 个来源");
   await page.locator(".brief-meta-summary").click();
-  await expect(page.locator("#runDailyButton")).toBeVisible();
+  await expect(page.locator("#runDailyButton")).toHaveCount(0);
+  await expect(page.locator("#filterConsole")).toHaveCount(0);
+  await expect(page.locator(".failed-sources")).toHaveCount(0);
   expect(pageErrors).toEqual([]);
   expect((await page.screenshot()).byteLength).toBeGreaterThan(1_000);
 });
@@ -100,9 +102,26 @@ test("public review output exposes target evidence fields without operator contr
     "2026-07-23",
     [{ id: "internal", name: "Internal failure", reason: "must stay private" }],
     undefined,
-    undefined,
-    undefined,
-    undefined,
+    { passed: true, summary: "本期来源覆盖与摘要质量符合发布标准。", issues: [], suggestions: [] },
+    {
+      fetchedSources: 12,
+      successfulSources: 11,
+      sourceSuccessRate: 11 / 12,
+      fetchedArticles: 120,
+      dedupedArticles: 96,
+      displayedArticles: 1,
+      aiEnrichedArticles: 1,
+      freshnessWindowHours: 72,
+      freshArticles: 82,
+      staleArticlesRejected: 12,
+      undatedArticlesRejected: 2,
+      futureArticlesRejected: 0,
+      liveSnapshotArticles: 1,
+      newestPublishedAt: "2026-07-23T06:20:00.000Z",
+      generatedAt: "2026-07-23T07:00:00.000Z",
+      mode: "fresh",
+    },
+    { baseRules: "公共日报基础筛选规则", customKeywords: ["AI Agent"], mode: "incremental" },
     {
       ruleSetName: "evidence_first",
       ruleSetVersion: "evidence-first-review-v1.4-r2",
@@ -116,15 +135,11 @@ test("public review output exposes target evidence fields without operator contr
 
   await page.setContent(html);
   await expect(page.locator(".brief-meta")).toHaveAttribute("open", "");
-  await expect(page.locator(".public-disclosure")).toContainText("evidence_first");
-  await expect(page.locator(".public-disclosure")).toContainText("Review revision 2");
+  await expect(page.locator(".public-disclosure")).toHaveCount(0);
   await expect(page.locator("#runDailyButton")).toHaveCount(0);
   await expect(page.locator("#filterConsole")).toHaveCount(0);
   await expect(page.locator(".failed-sources")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "前往 GitHub Actions 手动运行" })).toHaveAttribute(
-    "href",
-    "https://github.com/gtbwpkwjnb-alt/DailyBrief/actions/workflows/daily.yml",
-  );
+  await expect(page.getByRole("link", { name: "前往 GitHub Actions 手动运行" })).toHaveCount(0);
   await expect(page.locator(".article-priority")).toContainText("P1");
   await expect(page.locator(".article-legacy-score")).toHaveCount(0);
   await expect(page.locator(".article-public-context")).toContainText("公共影响高");
@@ -135,14 +150,79 @@ test("public review output exposes target evidence fields without operator contr
   await expect(page.locator(".article")).toHaveAttribute("data-item-id", "review-item");
   await expect(page.locator(".article")).toHaveAttribute("data-story-id", "review-story");
   await expect(page.locator(".article")).toHaveAttribute("data-stable-order", "1");
-  await expect(page.getByRole("link", { name: "反馈本期简报" })).toHaveAttribute(
-    "href",
-    /github\.com\/gtbwpkwjnb-alt\/DailyBrief\/issues\/new/,
-  );
+  await expect(page.getByText("反馈本期简报")).toHaveCount(0);
+  await expect(page.locator(".brief-meta-summary")).toContainText("当前日报质量分析");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("本期来源覆盖与摘要质量符合发布标准");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("91.7%");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("抓取入库");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("120 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("初筛候选");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("82 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("前端精选");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("AI 精炼 1/1");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("抽检通过");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("公共日报");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("按 URL 和规范化标题去重");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("栏目配额、来源均衡");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("AI 只对选入条目");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("用户个性化");
+  await expect(page.locator("#readerKeywordsInput")).toHaveValue("AI Agent");
   expect(pageErrors).toEqual([]);
 });
 
-test("world cards show publisher attribution and the incremental filter control", async ({ page }) => {
+test("reader preferences and hot-tag suggestions work without a backend", async ({ page }) => {
+  const articles: ArticleInput[] = [
+    {
+      sourceId: "github-trending",
+      source: "GitHub Trending",
+      title: "AI agent infrastructure",
+      displayTitle: "AI Agent 基础设施持续升温",
+      url: "https://example.com/ai-agent",
+      category: "tech",
+      summary: "用于验证热点词建议和行业分析测试流程。",
+      tags: ["AI Agent", "人工智能"],
+      importance: 7,
+    },
+  ];
+  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-24", []);
+
+  await page.setContent(html);
+  await expect(page.locator("#readerKeywordsInput")).toHaveAttribute("placeholder", /AI Agent/);
+  await page.locator(".brief-meta-summary").click();
+  await page.locator(".tag-cloud-chip[data-tag='AI Agent']").click();
+  await expect(page.locator("#readerKeywordsInput")).toHaveValue("AI Agent");
+  await expect(page.locator("#readerKeywordHint")).toContainText("已自动保存在本机");
+  await expect(page.locator(".industry-lab")).toHaveCount(0);
+  await expect(page.getByText("行业分析简报")).toHaveCount(0);
+});
+
+test("Google Trends cards expose the original query and explain editorial importance", async ({ page }) => {
+  const article: ArticleInput = {
+    sourceId: "google-trends-us",
+    source: "Google 热搜 · 美国",
+    title: "jordan rodgers",
+    displayTitle: "乔丹·罗杰斯相关搜索热度上升",
+    url: "https://trends.google.com/trending/rss?geo=US",
+    category: "trending",
+    summary: "该词条在美国谷歌热搜中成为热门搜索词，暂无具体内容。",
+    importance: 3,
+  };
+  const html = renderHtml(report, groupRaw([article], sources), "2026-07-24", []);
+
+  await page.setContent(html);
+  await expect(page.locator(".article-title")).toContainText("乔丹·罗杰斯相关搜索热度上升");
+  await expect(page.locator(".article-search-query")).toContainText("原始搜索词");
+  await expect(page.locator(".article-search-query")).toBeVisible();
+  await expect(page.locator(".article-search-query code")).toHaveText("jordan rodgers");
+  await expect(page.locator(".article-summary")).toContainText("搜索词「jordan rodgers」");
+  await expect(page.locator(".article-legacy-score")).toContainText("编辑重要度 3/10");
+  await expect(page.getByText("旧模型评分")).toHaveCount(0);
+
+  await page.locator(".brief-meta-summary").click();
+  await expect(page.locator(".public-disclosure")).toHaveCount(0);
+});
+
+test("world cards show publisher attribution without operator controls", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const article: ArticleInput = {
@@ -166,9 +246,10 @@ test("world cards show publisher attribution and the incremental filter control"
   await expect(page.locator(".article-attribution")).toContainText("美国");
   await expect(page.locator(".article-attribution")).toContainText("伊朗");
   await page.locator(".brief-meta-summary").click();
-  await page.locator("#customFilterToggle").click();
-  await expect(page.locator("#customFilterForm")).toBeVisible();
-  await expect(page.locator("#customKeywordsInput")).toHaveAttribute("maxlength", "120");
+  await expect(page.locator("#runDailyButton")).toHaveCount(0);
+  await expect(page.locator("#filterConsole")).toHaveCount(0);
+  await expect(page.locator(".failed-sources")).toHaveCount(0);
+  await expect(page.locator("#readerKeywordsInput")).toHaveAttribute("maxlength", "120");
   expect(pageErrors).toEqual([]);
 });
 
@@ -197,11 +278,10 @@ test("Signal White theme remains readable without mobile overflow", async ({ pag
     };
   });
 
-  expect(colors).toEqual({
-    background: "rgb(244, 247, 250)",
-    header: "rgb(11, 19, 43)",
-    title: "rgb(248, 251, 255)",
-  });
+  expect(colors.header).toBe("rgb(11, 19, 43)");
+  expect(colors.title).toBe("rgb(248, 251, 255)");
+  expect(colors.background).not.toBe("");
+  await expect(page.locator("body")).toHaveAttribute("data-active-category", "trending");
   expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.width);
   await expect(page.locator(".tabs")).toBeVisible();
   await expect(page.locator(".reading-context")).toBeVisible();
@@ -247,12 +327,17 @@ test("continuous stream keeps sections in one flow and progressively reveals mor
   await page.setContent(html);
 
   await expect(page.locator("[data-panel='trending']")).toBeVisible();
+  const trendingBackground = await page.locator("body").evaluate((element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor);
+  await expect(page.locator("body")).toHaveAttribute("data-active-category", "trending");
   await expect(page.locator(".article.stream-pending")).toHaveCount(4);
   await page.locator(".tab[data-tab='tech']").click();
   await expect(page.locator("[data-panel='tech']")).toBeVisible();
   await expect(page.locator("[data-panel='trending']")).toBeVisible();
   await expect(page.locator("#currentCategory")).toContainText("技术动态");
   await expect(page.locator("#readingPosition")).toContainText("15 / 16");
+  await expect(page.locator("body")).toHaveAttribute("data-active-category", "tech");
+  const techBackground = await page.locator("body").evaluate((element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor);
+  expect(techBackground).not.toBe(trendingBackground);
   await expect(page.locator(".panel:not(.active)")).toHaveCount(0);
 });
 

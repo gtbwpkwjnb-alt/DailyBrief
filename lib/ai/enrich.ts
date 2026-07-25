@@ -13,6 +13,22 @@ export interface EnrichInput {
   customKeywords?: string[];
 }
 
+/** Detect output that is visibly garbled or violates the configured output locale. */
+export function looksLikeGarbledAiText(value: string | undefined): boolean {
+  const text = value?.trim() ?? "";
+  if (!text) return false;
+  if (/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)) return true;
+  if (/(?:\?{3,}|\u951f\u65a4\u62f7|\u00c3|\u00c2|\u00e2)/.test(text)) return true;
+
+  // Chinese editions must not silently publish an untranslated all-English summary.
+  if (REPORT_LOCALE === "zh") {
+    const cjk = (text.match(/[\u3400-\u9FFF]/g) ?? []).length;
+    const letters = (text.match(/[A-Za-z]/g) ?? []).length;
+    if (text.length >= 36 && cjk === 0 && letters >= 24) return true;
+  }
+  return false;
+}
+
 const GH_SYSTEM_PROMPT_ZH = `你是一名技术编辑，负责为 GitHub Trending 项目写中文介绍。
 
 输入：每个项目有 owner/repo 名 + 一行英文 description（可能没有）。
@@ -802,7 +818,9 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 - 纯中文，不需要空格
 
 **4. 重要度评分（必需）**
-- 1-10 分，10 为最重要。基于：新闻影响力、时效性、与目标读者的相关性
+- 1-10 分，作为编辑排序参考，不代表事实可信度；综合新闻影响力、时效性、与目标读者的相关性
+- 1-3：影响范围有限、信息不足或与读者弱相关；4-6：一般行业动态或区域性关注；7-8：对较多读者有明确、近期影响；9-10：罕见，仅用于已由输入明确支持的重大、广泛且紧迫事件
+- Google/微博/百度热搜仅表示关注度变化，上榜本身不得高于 5 分；只有输入明确给出广泛现实影响时才能提高
 
 **5. 国际时政归属（必需）**
 - coverageCountries 只能填写标题或原文明确提到的国家/地区，最多 4 个；没有明确提及时返回空数组
@@ -856,7 +874,9 @@ Task: for each item, do ALL three:
 - Order: broad to narrow
 
 **4. Importance score (required)**
-- 1-10, 10 = most important. Based on: impact, timeliness, relevance
+- 1-10 editorial ranking aid, not factual confidence; combine impact, timeliness, and reader relevance
+- 1-3: limited reach, sparse information, or weak relevance; 4-6: routine industry or regional interest; 7-8: clear recent impact on many readers; 9-10: rare, only for major, broad, urgent events explicitly supported by the input
+- A Google or social hot-search ranking is only an attention signal and must not score above 5 by itself; raise it only when the input explicitly supports broad real-world impact
 
 **5. World-news geography (required)**
 - coverageCountries may contain only countries or regions explicitly present in the title or source text, max 4; use [] when unclear
@@ -969,7 +989,7 @@ export async function consolidatedEnrich(
 
   const missing = items.filter((item) => {
     const value = result.get(item.url);
-    return !value?.displayTitle || !value.summary;
+    return !value?.displayTitle || !value.summary || looksLikeGarbledAiText(value.summary);
   });
   for (let i = 0; i < missing.length; i += 10) {
     const batch = missing.slice(i, i + 10);
@@ -978,6 +998,29 @@ export async function consolidatedEnrich(
       merge(await runConsolidatedOnce(batch, CONSOLIDATED_PROMPTS, batchPrompt, `${categoryLabel}-recovery`));
     } catch (e) {
       console.warn(`[enrich] consolidated "${categoryLabel}" recovery batch failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // A response can be valid JSON while still containing an untranslated or
+  // visibly garbled summary. Retry only those items up to three times; the
+  // caller can suppress the item after the bounded recovery budget is spent.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const malformed = items.filter((item) => {
+      const value = result.get(item.url);
+      return !value?.displayTitle || !value.summary || looksLikeGarbledAiText(value.summary);
+    });
+    if (malformed.length === 0) break;
+    const repairPrompt = [
+      buildConsolidatedPrompt(categoryLabel, malformed, langHeader, options),
+      REPORT_LOCALE === "en"
+        ? "This is a repair attempt. Replace every missing, untranslated, or garbled field with a clean English value."
+        : "这是定向修复尝试。请将缺失、未翻译或乱码字段全部改为通顺、完整的中文；不要返回问号占位符。",
+    ].join("\n\n");
+    try {
+      merge(await runConsolidatedOnce(malformed, CONSOLIDATED_PROMPTS, repairPrompt, `${categoryLabel}-garbled-repair-${attempt}`));
+      console.log(`[enrich] consolidated "${categoryLabel}" garbled repair ${attempt}/3: ${malformed.length} item(s)`);
+    } catch (e) {
+      console.warn(`[enrich] consolidated "${categoryLabel}" garbled repair ${attempt}/3 failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1095,11 +1138,11 @@ function evidenceFallback(item: EnrichInput, label: string): ConsolidatedValue {
   const sourceTitle = item.title.trim();
   const summary = REPORT_LOCALE === "en"
     ? "The source does not provide verifiable " + label + " evidence. Title retained for manual review: " + sourceTitle
-    : "?????????" + label + "????????????" + sourceTitle;
+    : "原文未提供可核验的" + label + "证据，标题保留供人工复核：" + sourceTitle;
   return {
-    displayTitle: REPORT_LOCALE === "en" ? sourceTitle : "????" + sourceTitle,
+    displayTitle: REPORT_LOCALE === "en" ? sourceTitle : "待核验：" + sourceTitle,
     summary,
-    tags: ["???"],
+    tags: REPORT_LOCALE === "en" ? ["manual review"] : ["待核验"],
     importance: 3,
     coverageCountries: [],
     interestMatches: [],

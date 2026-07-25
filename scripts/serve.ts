@@ -161,7 +161,7 @@ function latestDateDir(): string | null {
 /**
  * Load the latest report + articles sidecar.
  */
-function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: string; failedSources?: Array<{ id: string; name: string; reason: string }>; runStats?: RunStats; filterProfile?: FilterProfile } | null {
+function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: string; failedSources?: Array<{ id: string; name: string; reason: string }>; runStats?: RunStats; filterProfile?: FilterProfile; qualityReview?: { passed: boolean; summary: string; issues: string[]; suggestions: string[] } } | null {
   const dateDir = latestDateDir();
   if (!dateDir) return null;
   const base = path.join(REPORTS_DIR, dateDir, dateDir);
@@ -170,7 +170,7 @@ function loadLatest(): { report: DailyReport; articles: ArticleInput[]; date: st
   if (!fs.existsSync(reportJson) || !fs.existsSync(articlesJson)) return null;
   const report = JSON.parse(fs.readFileSync(reportJson, "utf8")) as DailyReport;
   const sidecar = parseReportSidecar(JSON.parse(fs.readFileSync(articlesJson, "utf8")));
-  return { report, articles: sidecar.articles, date: dateDir, failedSources: sidecar.failedSources, runStats: sidecar.runStats, filterProfile: sidecar.filterProfile };
+  return { report, articles: sidecar.articles, date: dateDir, failedSources: sidecar.failedSources, runStats: sidecar.runStats, filterProfile: sidecar.filterProfile, qualityReview: sidecar.qualityReview };
 }
 
 /**
@@ -259,9 +259,9 @@ const server = http.createServer(async (req, res) => {
           const base = path.join(REPORTS_DIR, dateDir, dateDir);
           // Remove failed source from list if it succeeded
           latest.failedSources = (latest.failedSources ?? []).filter((f) => f.id !== sourceId);
-          const html = renderHtml(latest.report, raw, latest.date, latest.failedSources, undefined, undefined, latest.runStats, latest.filterProfile);
+          const html = renderHtml(latest.report, raw, latest.date, latest.failedSources, undefined, latest.qualityReview, latest.runStats, latest.filterProfile);
           fs.writeFileSync(`${base}.html`, html, "utf8");
-          fs.writeFileSync(`${base}-articles.json`, JSON.stringify({ date: latest.date, articles: latest.articles, failedSources: latest.failedSources, runStats: latest.runStats, filterProfile: latest.filterProfile }, null, 2), "utf8");
+          fs.writeFileSync(`${base}-articles.json`, JSON.stringify({ date: latest.date, articles: latest.articles, failedSources: latest.failedSources, runStats: latest.runStats, filterProfile: latest.filterProfile, qualityReview: latest.qualityReview }, null, 2), "utf8");
           console.log(`[serve] merged ${newItems.length} new items, re-rendered HTML`);
         }
         if (items.length > 0) {
