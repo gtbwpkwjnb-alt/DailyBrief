@@ -226,6 +226,41 @@ export type SubGroup = {
 
 export type RawByCategory = Record<Category, SubGroup[]>;
 
+export function visibleArticlesFromRaw(raw: RawByCategory): ArticleInput[] {
+  const seen = new Set<string>();
+  const visible: ArticleInput[] = [];
+  for (const category of Object.keys(raw) as Category[]) {
+    for (const subgroup of raw[category]) {
+      for (const source of subgroup.sources) {
+        for (const article of source.items) {
+          if (seen.has(article.url)) continue;
+          seen.add(article.url);
+          visible.push(article);
+        }
+      }
+    }
+  }
+  return visible;
+}
+
+export function filterRawArticles(
+  raw: RawByCategory,
+  predicate: (article: ArticleInput) => boolean,
+): RawByCategory {
+  return Object.fromEntries(
+    (Object.keys(raw) as Category[]).map((category) => [
+      category,
+      raw[category].map((subgroup) => ({
+        ...subgroup,
+        sources: subgroup.sources.map((source) => ({
+          ...source,
+          items: source.items.filter(predicate),
+        })),
+      })),
+    ]),
+  ) as RawByCategory;
+}
+
 export type RunStats = {
   fetchedSources: number;
   successfulSources: number;
@@ -234,6 +269,7 @@ export type RunStats = {
   dedupedArticles: number;
   displayedArticles?: number;
   aiEnrichedArticles?: number;
+  enrichmentVersion?: number;
   suppressedArticles?: number;
   freshnessWindowHours?: number;
   freshArticles?: number;
@@ -669,15 +705,8 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
     REPORT_LOCALE,
   );
   const summary = summaryText ? escapeHtml(summaryText) : "";
-  const importance = Number.isFinite(a.importance) ? Math.max(1, Math.min(10, Math.round(a.importance!))) : null;
-  const priorityHtml = a.priorityLevel
-    ? `<span class="article-priority priority-${a.priorityLevel.toLowerCase()}">${STR.publicPriority} ${a.priorityLevel}</span>`
-    : importance
-      ? `<span class="article-legacy-score">${STR.legacyImportance} ${importance}/10</span>`
-      : "";
+  const aiAnalysis = a.aiAnalysis ? escapeHtml(a.aiAnalysis) : "";
   const stats = a.meta ? escapeHtml(a.meta) : "";
-  const time = formatDate(a.publishedAt);
-  const sourceLabel = showSource && a.source ? escapeHtml(a.source) : "";
   const sourceDef = sources.find((source) => source.id === a.sourceId);
   const sourceCountry = a.sourceCountry ?? sourceDef?.originCountry;
   const coverageCountries = a.coverageCountries?.length
@@ -687,28 +716,13 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
     ? politicsAttribution(sourceCountry, coverageCountries)
     : "";
   const attributionHtml = attribution
-    ? `<span class="article-attribution">${escapeHtml(attribution)}</span>`
+    ? `<p class="article-attribution-line"><span class="article-attribution">${escapeHtml(attribution)}</span></p>`
     : "";
-  // For merged subgroups (politics/finance/trending), the source name + time
-  // identifies the article → no need for the full English headline.
-  // For per-source tabs (GH Trending, Papers, X), show a brief title.
-  // When showSource is true, we're inside a merged group → hide the title.
-  const showTitle = !showSource || a.category === "trending";
+  // The title is the primary and only per-card outbound link.
+  const showTitle = true;
   const trendQueryHtml = isHotSearchArticle(a.sourceId)
     ? `<p class="article-search-query"><span>${REPORT_LOCALE === "en" ? "Original search query" : "原始搜索词"}</span><code>${escapeHtml(normalizeHotSearchQuery(a.title))}</code></p>`
     : "";
-  // Build meta line: source name (clickable link) + rest of meta
-  let metaHtml = "";
-  if (sourceLabel && url) {
-    const sourceLink = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-source-link">${sourceLabel}</a>`;
-    metaHtml = [attributionHtml, sourceLink, time].filter(Boolean).join(" · ");
-  } else if (sourceLabel) {
-    metaHtml = [attributionHtml, sourceLabel, time].filter(Boolean).join(" · ");
-  } else if (time) {
-    metaHtml = [attributionHtml, time].filter(Boolean).join(" · ");
-  } else {
-    metaHtml = attributionHtml;
-  }
   // News-style summary label for finance/politics, project-intro style for GH/tech.
   const newsy = a.category === "trending" || a.category === "finance" || a.category === "politics";
   const summaryLabel = newsy ? STR.summaryLabelNews : STR.summaryLabelIntro;
@@ -741,15 +755,15 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
   ].join("");
 
   return `<article class="article" data-article-url="${url}"${identityAttributes}${tagAttr}>
-    ${metaHtml || priorityHtml ? `<p class="article-meta">${metaHtml}${metaHtml && priorityHtml ? " · " : ""}${priorityHtml}</p>` : ""}
     ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>${trendQueryHtml}` : ""}
+    ${attributionHtml}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
     ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel} · ${STR.aiRefined}</span> ` : ""}${summary}</p>` : ""}
+    ${aiAnalysis ? `<p class="article-analysis"><span>${REPORT_LOCALE === "en" ? "AI analysis" : "AI 评价"}</span>${aiAnalysis}</p>` : ""}
     ${publicContext}
     ${tags || interestMatches.length > 0 ? `<p class="article-tags">${visibleTags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}${hiddenTagCount > 0 ? `<span class="tag tag-more">+${hiddenTagCount}</span>` : ""}${interestMatches.slice(0, 1).map((keyword) => `<span class="tag interest-tag">兴趣：${escapeHtml(keyword)}</span>`).join("")}</p>` : ""}
     ${excerpt && !(REPORT_LOCALE === "zh" && summary) ? `<p class="article-excerpt">📎 ${excerpt}</p>` : ""}
     ${a.revision !== undefined ? `<p class="article-revision">${STR.revision} ${a.revision}</p>` : ""}
-    ${url && (metaHtml || showTitle) ? `<a href="${url}" target="_blank" rel="noopener noreferrer" class="article-permalink" title="${escapeHtml(a.title)}">🔗</a>` : ""}
   </article>`;
 }
 
@@ -879,7 +893,7 @@ function renderTagCloud(tags: TagEntry[]): string {
   const heatColors = ["tag-heat-0", "tag-heat-1", "tag-heat-2", "tag-heat-3"];
   const allChips = tags.map((t, i) => {
     const cls = heatColors[heatLevel(i, tags.length)];
-    return `<span class="tag-cloud-chip ${cls}" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></span>`;
+    return `<button type="button" class="tag-cloud-chip ${cls}" data-tag="${escapeHtml(t.tag)}">${escapeHtml(t.tag)}<sup class="tag-count">${t.count}</sup></button>`;
   }).join("");
   // Only show expand button when tags won't fit in one row (~10+ tags)
   const expandBtn = tags.length > 8
@@ -1050,8 +1064,8 @@ export function renderHtml(
     </div>
     <form class="reader-keyword-form" id="readerKeywordForm">
       <label for="readerKeywordsInput">${REPORT_LOCALE === "en" ? "My selection keywords" : "我的筛选原则词汇"}</label>
-      <div class="reader-keyword-row"><input id="readerKeywordsInput" maxlength="120" autocomplete="off" placeholder="${REPORT_LOCALE === "en" ? "Suggested: AI agents, robotics, semiconductors, new energy" : "建议词：AI Agent、机器人、半导体、新能源、出海"}" value="${escapeHtml(effectiveFilterProfile.customKeywords.join("、"))}"><button type="submit">${REPORT_LOCALE === "en" ? "Save" : "保存词汇"}</button></div>
-      <p id="readerKeywordHint">${REPORT_LOCALE === "en" ? "Choose current topics from Hot Tags below. Avoid terms so personal that no story can match." : "建议从下方热点标签选择词汇；尽量避免过度个性化、当天无内容可匹配的词。"}</p>
+      <div class="reader-keyword-row"><input id="readerKeywordsInput" type="search" maxlength="120" autocomplete="off" enterkeyhint="done" aria-describedby="readerKeywordHint" placeholder="${REPORT_LOCALE === "en" ? "Suggested: AI agents, robotics, semiconductors, new energy" : "建议词：AI Agent、机器人、半导体、新能源、出海"}" value="${escapeHtml(effectiveFilterProfile.customKeywords.join("、"))}"><button id="readerKeywordSaveButton" type="submit">${REPORT_LOCALE === "en" ? "Save and apply" : "保存并应用"}</button></div>
+      <p id="readerKeywordHint" role="status" aria-live="polite">${REPORT_LOCALE === "en" ? "Choose up to 8 current topics from Hot Tags below. Matching stories remain highlighted in this edition." : "最多保存 8 个词；建议从下方热点标签选择，应用后会标记当前日报中的匹配内容。"}</p>
     </form>
   </section>`;
   const reviewDetailsHtml = reviewHtml(review);
@@ -1135,7 +1149,9 @@ export function renderHtml(
   html { scroll-behavior: smooth; font-size: 16px; }
   body {
     margin: 0;
-    background: color-mix(in srgb, var(--bg) 94%, var(--section-wash));
+    --section-accent: var(--cat-tech);
+    --section-wash: color-mix(in srgb, var(--section-accent) 12%, var(--bg));
+    background: var(--section-wash);
     color: var(--fg);
     font-family: "Cabinet Grotesk", "Segoe UI Variable", -apple-system,
       BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -1144,12 +1160,12 @@ export function renderHtml(
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.45s ease;
   }
-  body[data-active-category="trending"] { --section-accent: var(--cat-trending); --section-wash: #fff0ef; }
-  body[data-active-category="tech"] { --section-accent: var(--cat-tech); --section-wash: #edf5ff; }
-  body[data-active-category="trading"] { --section-accent: var(--cat-trading); --section-wash: #fff4e8; }
-  body[data-active-category="politics"] { --section-accent: var(--cat-politics); --section-wash: #f5f0ff; }
-  body[data-active-category="finance"] { --section-accent: var(--cat-finance); --section-wash: #ebfaf5; }
-  body[data-active-category="community"] { --section-accent: var(--cat-community); --section-wash: #fff0f8; }
+  body[data-active-category="trending"] { --section-accent: var(--cat-trending); }
+  body[data-active-category="tech"] { --section-accent: var(--cat-tech); }
+  body[data-active-category="trading"] { --section-accent: var(--cat-trading); }
+  body[data-active-category="politics"] { --section-accent: var(--cat-politics); }
+  body[data-active-category="finance"] { --section-accent: var(--cat-finance); }
+  body[data-active-category="community"] { --section-accent: var(--cat-community); }
   main {
     max-width: 1180px;
     margin: 0 auto;
@@ -1448,9 +1464,9 @@ export function renderHtml(
   }
   .sub-tab:hover { border-color: var(--muted); color: var(--fg); }
   .sub-tab.active {
-    background: var(--accent);
-    color: var(--accent-fg);
-    border-color: transparent;
+    background: var(--section-accent);
+    color: #fff;
+    border-color: var(--section-accent);
     box-shadow: var(--shadow-sm);
   }
   .sub-tab .count {
@@ -1485,9 +1501,9 @@ export function renderHtml(
   }
   .source-tab:hover { border-color: var(--muted); color: var(--fg); }
   .source-tab.active {
-    background: var(--fg);
-    color: var(--bg);
-    border-color: var(--fg);
+    background: var(--section-accent);
+    color: #fff;
+    border-color: var(--section-accent);
     box-shadow: var(--shadow-sm);
   }
   .source-tab .count {
@@ -1531,33 +1547,7 @@ export function renderHtml(
     font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
     font-size: 0.72rem;
   }
-  .article-meta { color: var(--muted); font-size: 0.74rem; margin: 0 0 0.3rem; }
-  .article-importance {
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.25rem;
-    padding: 0.05rem 0.42rem;
-    border-radius: 0.3rem;
-    font-size: 0.66rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  .article-priority,
-  .article-legacy-score {
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.25rem;
-    padding: 0.05rem 0.42rem;
-    border: 1px solid currentColor;
-    border-radius: 0.25rem;
-    font-size: 0.66rem;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  .priority-p0, .priority-p1 { color: #b42318; }
-  .priority-p2 { color: #8a5a00; }
-  .priority-p3, .priority-p4 { color: #526577; }
-  .article-legacy-score { color: var(--muted); border-style: dashed; }
+  .article-attribution-line { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.72rem; }
   .article-public-context {
     display: grid;
     gap: 0.28rem;
@@ -1605,8 +1595,12 @@ export function renderHtml(
   .reader-keyword-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; }
   .reader-keyword-row input { min-width: 0; border: 1px solid var(--rule); border-radius: 0.35rem; padding: 0.52rem 0.6rem; background: var(--bg-elevated); color: var(--fg); font: inherit; font-size: 0.72rem; }
   .reader-keyword-row button { border: 0; border-radius: 0.35rem; padding: 0.52rem 0.72rem; background: var(--accent); color: var(--accent-fg); font: inherit; font-size: 0.7rem; font-weight: 700; cursor: pointer; }
+  .reader-keyword-row button:disabled { cursor: default; opacity: 0.52; }
   .reader-keyword-form > p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.66rem; line-height: 1.55; }
   .reader-keyword-form.saved .reader-keyword-row input { border-color: #176b45; }
+  .reader-keyword-form.dirty .reader-keyword-row input { border-color: var(--link); box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 12%, transparent); }
+  .article.keyword-match { background: color-mix(in srgb, var(--link) 8%, var(--bg-elevated)); border-left-color: var(--link); }
+  .article.keyword-dimmed { opacity: 0.38; }
   .run-console {
     margin: 0.85rem 0 1.25rem;
     padding: 0.8rem 0;
@@ -1726,6 +1720,21 @@ export function renderHtml(
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
+  .article-analysis {
+    margin: 0.45rem 0 0;
+    padding: 0.5rem 0 0;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.65;
+  }
+  .article-analysis span {
+    display: inline-block;
+    margin-right: 0.45rem;
+    color: var(--accent);
+    font-size: 0.68rem;
+    font-weight: 700;
+  }
 
   /* ===== tag chips ===== */
   .article-tags {
@@ -1747,32 +1756,6 @@ export function renderHtml(
     line-height: 1.6;
   }
 
-  /* ===== source link style ===== */
-  .article-source-link {
-    color: var(--muted);
-    text-decoration: none;
-    font-weight: 600;
-    transition: color 0.15s;
-  }
-  .article-source-link:hover {
-    color: var(--link);
-  }
-
-  /* ===== permalink icon ===== */
-  .article-permalink {
-    display: inline-block;
-    margin-top: 0.2rem;
-    font-size: 0.72rem;
-    text-decoration: none;
-    opacity: 0;
-    color: var(--muted);
-    transition: opacity 0.15s, color 0.15s;
-  }
-  .article:hover .article-permalink { opacity: 0.5; }
-  .article-permalink:hover {
-    opacity: 1;
-    color: var(--link);
-  }
   .article.tag-highlight {
     background: var(--card);
     margin: 0 -0.5rem;
@@ -1860,6 +1843,8 @@ export function renderHtml(
   .tag-cloud-chip {
     display: inline-flex;
     align-items: baseline;
+    border: 0;
+    font-family: inherit;
     font-size: 0.72rem;
     padding: 0.18rem 0.6rem;
     border-radius: 999px;
@@ -2548,13 +2533,17 @@ export function renderHtml(
 	    background: color-mix(in srgb, var(--link) 5%, var(--bg-elevated));
 	  }
 	  .article-title { font-size: 0.96rem; line-height: 1.42; }
-	  .article-meta { font-size: 0.72rem; }
 	  .article-summary {
 	    padding: 0.55rem 0.75rem;
 	    background: #eef5ff;
 	    border-left-color: var(--link);
 	    font-size: 0.88rem;
 	    line-height: 1.62;
+	  }
+	  .article-analysis {
+	    font-size: 0.82rem;
+	    line-height: 1.62;
+	    overflow-wrap: anywhere;
 	  }
 	  .article-excerpt { max-width: 82ch; }
 	  .tag { border-radius: 0.25rem; }
@@ -2599,6 +2588,7 @@ export function renderHtml(
 	    top: 0.75rem;
 	    z-index: 25;
 	  }
+	  .mobile-context-navigation { display: none; }
 	  .stream-navigation .tabs {
 	    position: static;
 	    display: grid;
@@ -2674,8 +2664,9 @@ export function renderHtml(
 	    scroll-margin-top: 0.8rem;
 	    margin: 0 0 1.4rem;
 	    padding: 0.9rem 1rem 0.35rem;
-	    background: var(--bg-elevated);
-	    border: 1px solid var(--rule);
+	    --section-accent: var(--section-color);
+	    background: color-mix(in srgb, var(--section-color) 4%, var(--bg-elevated));
+	    border: 1px solid color-mix(in srgb, var(--section-color) 34%, var(--rule));
 	    border-radius: var(--radius);
 	    box-shadow: var(--shadow-sm);
 	    border-top: 3px solid var(--section-color, var(--section-accent));
@@ -2687,6 +2678,8 @@ export function renderHtml(
 	  .stream-section[data-panel="finance"] { --section-color: var(--cat-finance); }
 	  .stream-section[data-panel="community"] { --section-color: var(--cat-community); }
 	  .stream-section .stream-category-heading { border-bottom-color: color-mix(in srgb, var(--section-color) 58%, var(--rule)); }
+	  .stream-section .sub-tabs,
+	  .stream-section .source-tabs { border-color: color-mix(in srgb, var(--section-color) 34%, var(--rule)); }
 	  .stream-category-heading,
 	  .stream-sub-heading,
 	  .stream-source-heading {
@@ -2710,7 +2703,7 @@ export function renderHtml(
 	    padding-top: 0.45rem;
 	  }
 	  .sub-content + .sub-content { margin-top: 1.2rem; border-top: 1px solid var(--rule); }
-	  .stream-sub-heading { margin-bottom: 0.3rem; }
+	  .stream-sub-heading { margin-bottom: 0.3rem; border-bottom: 1px solid color-mix(in srgb, var(--section-color) 32%, var(--rule)); }
 	  .stream-sub-heading h2 { margin: 0; font-size: 0.9rem; color: var(--fg-soft); }
 	  .source-content {
 	    display: block;
@@ -2724,11 +2717,34 @@ export function renderHtml(
 	    margin: 0 -0.2rem;
 	    padding: 0.35rem 0.2rem;
 	    background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-	    border-bottom: 1px solid var(--rule);
+	    border-bottom: 1px solid color-mix(in srgb, var(--section-color) 38%, var(--rule));
 	    backdrop-filter: blur(8px);
 	    color: var(--fg-soft);
 	    font-size: 0.72rem;
 	    font-weight: 700;
+	  }
+	  .stream-source-heading span:first-child::before {
+	    content: "";
+	    display: inline-block;
+	    width: 0.38rem;
+	    height: 0.38rem;
+	    margin-right: 0.4rem;
+	    border-radius: 50%;
+	    background: var(--section-color);
+	    vertical-align: 0.05rem;
+	  }
+	  .stream-section .article {
+	    margin: 0.45rem 0;
+	    padding: 0.78rem 0.75rem;
+	    background: color-mix(in srgb, var(--section-color) 3%, var(--bg-elevated));
+	    border: 1px solid color-mix(in srgb, var(--section-color) 24%, var(--rule));
+	    border-left: 3px solid color-mix(in srgb, var(--section-color) 72%, var(--rule));
+	    border-radius: 0.38rem;
+	  }
+	  .stream-section .article:hover {
+	    margin: 0.45rem 0;
+	    padding: 0.78rem 0.75rem;
+	    background: color-mix(in srgb, var(--section-color) 7%, var(--bg-elevated));
 	  }
 	  .sub-tabs,
 	  .source-tabs { scroll-margin-top: 0.8rem; }
@@ -2770,6 +2786,7 @@ export function renderHtml(
 	  .sub-tab:focus-visible,
 	  .source-tab:focus-visible,
 	  .tag-cloud-chip:focus-visible,
+	  .reader-keyword-row button:focus-visible,
 	  .filter-custom-button:focus-visible,
 	  .filter-custom-actions button:focus-visible,
 	  .refetch-btn:focus-visible {
@@ -2817,8 +2834,8 @@ export function renderHtml(
 	      z-index: 30;
 	      margin: 0 -1rem 0.6rem;
 	      padding: 0.35rem 1rem;
-	      background: color-mix(in srgb, var(--bg) 95%, transparent);
-	      border-bottom: 1px solid var(--rule);
+	      background: color-mix(in srgb, var(--section-accent) 10%, var(--bg-elevated));
+	      border-bottom: 1px solid color-mix(in srgb, var(--section-accent) 38%, var(--rule));
 	      backdrop-filter: blur(12px);
 	    }
 	    .stream-navigation::after {
@@ -2829,7 +2846,7 @@ export function renderHtml(
 	      width: 2rem;
 	      height: 2rem;
 	      pointer-events: none;
-	      background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg) 96%, transparent));
+	      background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--section-accent) 10%, var(--bg-elevated)));
 	    }
 	    .stream-navigation .tabs {
 	      display: flex;
@@ -2844,21 +2861,38 @@ export function renderHtml(
 	    }
 	    .stream-navigation .tabs::-webkit-scrollbar { display: none; }
 	    .stream-navigation .tab { flex: 0 0 auto; width: auto; min-height: 2rem; padding: 0.38rem 0.55rem; }
+	    .mobile-context-navigation { display: grid; gap: 0.2rem; margin-top: 0.28rem; }
+	    .mobile-context-navigation nav {
+	      display: flex;
+	      flex-wrap: nowrap;
+	      gap: 0.25rem;
+	      overflow-x: auto;
+	      padding: 0.1rem 0 0.12rem;
+	      scrollbar-width: none;
+	    }
+	    .mobile-context-navigation nav::-webkit-scrollbar { display: none; }
+	    .mobile-context-navigation nav[hidden] { display: none; }
+	    .mobile-context-navigation .sub-tab,
+	    .mobile-context-navigation .source-tab { flex: 0 0 auto; min-height: 1.8rem; padding: 0.25rem 0.55rem; }
+	    .mobile-context-navigation .source-tab { border: 1px solid color-mix(in srgb, var(--section-accent) 35%, var(--rule)); border-radius: 0.3rem; }
+	    .mobile-context-navigation .source-tab.active { background: color-mix(in srgb, var(--section-accent) 15%, var(--bg-elevated)); color: var(--section-accent); border-color: var(--section-accent); }
 	    .reading-context { margin: 0.28rem 0 0; padding: 0.38rem 0.55rem; }
 	    .reading-context-path { display: flex; gap: 0.35rem; white-space: nowrap; overflow: hidden; }
 	    .reading-context-path span { overflow: hidden; text-overflow: ellipsis; }
 	    .reading-context-detail { margin-top: 0.2rem !important; }
 	    .reading-progress { margin-top: 0.25rem; }
 	    .update-available { margin-top: 0.28rem; padding: 0.4rem 0.55rem; }
-	    .panel.stream-section { scroll-margin-top: 6.2rem; margin-bottom: 0.75rem; padding: 0.7rem 0.72rem 0.2rem; }
+	    .stream-feed .sub-tabs,
+	    .stream-feed .source-tabs { display: none; }
+	    .panel.stream-section { scroll-margin-top: var(--mobile-stream-nav-height, 9rem); margin-bottom: 0.75rem; padding: 0.7rem 0.72rem 0.2rem; }
 	    .sub-content,
-	    .source-content { scroll-margin-top: 6.2rem; }
-	    .stream-source-heading { top: 5.95rem; }
+	    .source-content { scroll-margin-top: var(--mobile-stream-nav-height, 9rem); }
+	    .stream-source-heading { top: var(--mobile-stream-nav-height, 9rem); }
 	    .stream-category-heading h2 { font-size: 0.98rem; }
 	    .sub-tabs { margin: 0.45rem 0; }
 	    .source-tabs { margin: 0.35rem 0 0.45rem; }
-	    .article { margin: 0; padding-left: 0; padding-right: 0; }
-	    .article:hover { margin: 0; padding-left: 0; padding-right: 0; }
+	    .stream-section .article,
+	    .stream-section .article:hover { margin: 0.45rem 0; padding: 0.7rem 0.62rem; }
 	    .article-summary { padding: 0.45rem 0.55rem; font-size: 0.86rem; line-height: 1.55; }
 	    .article-tags { margin-top: 0.3rem; }
 	  }
@@ -2909,6 +2943,10 @@ export function renderHtml(
     <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "finance")}" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>
     ${techCommunitySubs.length > 0 ? `<button class="tab" type="button" data-scroll-target="${streamAnchor("category", "community")}" data-tab="community">${STR.catCommunity}<span class="count">${counts.community}</span></button>` : ""}
   </nav>
+  <div class="mobile-context-navigation" id="mobileContextNavigation">
+    <nav id="mobileSubTabs" aria-label="${REPORT_LOCALE === "en" ? "Current section shortcuts" : "当前二级栏目定位"}"></nav>
+    <nav id="mobileSourceTabs" aria-label="${REPORT_LOCALE === "en" ? "Current source shortcuts" : "当前信息源定位"}" hidden></nav>
+  </div>
   <div class="reading-context" aria-live="polite">
     <p class="reading-context-path"><span id="currentCategory">${raw.trending.length > 0 ? STR.catTrending : CATEGORY_LABELS.tech}</span><span id="currentSubcategory"></span></p>
     <p class="reading-context-detail"><span id="currentTags">${REPORT_LOCALE === "en" ? "All topics" : "全部标签"}</span><span id="readingPosition">1 / ${Math.max(1, totalStreamItems)}</span></p>
@@ -2951,16 +2989,18 @@ export function renderHtml(
     var form = document.getElementById('readerKeywordForm');
     var input = document.getElementById('readerKeywordsInput');
     var hint = document.getElementById('readerKeywordHint');
-    if (!form || !input || !hint) return;
+    var saveButton = document.getElementById('readerKeywordSaveButton');
+    if (!form || !input || !hint || !saveButton) return;
+    var savedValue = '';
 
     function normalizeReaderKeywords(raw) {
       var values = String(raw || '').split(/[\\n,，、;；|]+/);
       var result = [];
       var total = 0;
       values.forEach(function (value) {
-        var cleaned = value.replace(/\\s+/g, ' ').trim().slice(0, 24);
+        var cleaned = value.replace(/\\s+/g, ' ').trim();
         var key = cleaned.toLocaleLowerCase();
-        if (!cleaned || result.some(function (item) { return item.toLocaleLowerCase() === key; })) return;
+        if (!cleaned || cleaned.length > 24 || result.some(function (item) { return item.toLocaleLowerCase() === key; })) return;
         if (total + cleaned.length > 120 || result.length >= 8) return;
         result.push(cleaned);
         total += cleaned.length;
@@ -2968,32 +3008,133 @@ export function renderHtml(
       return result;
     }
 
+    function keywordValue() {
+      return normalizeReaderKeywords(input.value).join('、');
+    }
+
+    function keywordValidationError(raw) {
+      var values = String(raw || '').split(/[\\n,，、;；|]+/)
+        .map(function (value) { return value.replace(/\\s+/g, ' ').trim(); })
+        .filter(Boolean);
+      if (values.some(function (value) { return value.length > 24; })) {
+        return '${REPORT_LOCALE === "en" ? "Each keyword must be 24 characters or fewer." : "每个词最多 24 个字，请缩短后再保存。"}';
+      }
+      var unique = [];
+      values.forEach(function (value) {
+        if (!unique.some(function (item) { return item.toLocaleLowerCase() === value.toLocaleLowerCase(); })) unique.push(value);
+      });
+      if (unique.length > 8) {
+        return '${REPORT_LOCALE === "en" ? "Up to 8 keywords are allowed." : "最多保存 8 个词，请删除多余词汇后再保存。"}';
+      }
+      return '';
+    }
+
+    function applyKeywords(keywords) {
+      var normalized = keywords.map(function (keyword) { return keyword.toLocaleLowerCase(); });
+      var matches = 0;
+      var firstMatch = null;
+      document.querySelectorAll('.article').forEach(function (article) {
+        var haystack = ((article.dataset.tags || '') + ' ' + (article.textContent || '')).toLocaleLowerCase();
+        var matched = normalized.length > 0 && normalized.some(function (keyword) { return haystack.indexOf(keyword) !== -1; });
+        article.classList.toggle('keyword-match', matched);
+        article.classList.toggle('keyword-dimmed', normalized.length > 0 && !matched);
+        if (matched) {
+          matches++;
+          if (!firstMatch) firstMatch = article;
+        }
+      });
+      if (normalized.length > 0 && matches === 0) {
+        document.querySelectorAll('.article.keyword-dimmed').forEach(function (article) {
+          article.classList.remove('keyword-dimmed');
+        });
+      }
+      if (firstMatch) document.dispatchEvent(new CustomEvent('dailybrief:reveal-article', { detail: { article: firstMatch } }));
+      return matches;
+    }
+
+    function setCleanState() {
+      form.classList.remove('dirty');
+      saveButton.disabled = true;
+      saveButton.textContent = savedValue
+        ? '${REPORT_LOCALE === "en" ? "Applied" : "已应用"}'
+        : '${REPORT_LOCALE === "en" ? "No keywords" : "暂无词汇"}';
+    }
+
+    function setDirtyState() {
+      var dirty = keywordValue() !== savedValue;
+      var validationError = keywordValidationError(input.value);
+      form.classList.toggle('dirty', dirty);
+      form.classList.remove('saved');
+      saveButton.disabled = !dirty || Boolean(validationError);
+      saveButton.textContent = dirty && !keywordValue() && savedValue
+        ? '${REPORT_LOCALE === "en" ? "Clear and reset" : "清空并恢复公共日报"}'
+        : (dirty
+          ? '${REPORT_LOCALE === "en" ? "Save and apply" : "保存并应用"}'
+          : (savedValue ? '${REPORT_LOCALE === "en" ? "Applied" : "已应用"}' : '${REPORT_LOCALE === "en" ? "No keywords" : "暂无词汇"}'));
+      if (validationError) {
+        saveButton.textContent = '${REPORT_LOCALE === "en" ? "Adjust keywords" : "请调整词汇"}';
+        hint.textContent = validationError;
+      } else if (dirty) {
+        hint.textContent = '${REPORT_LOCALE === "en" ? "Unsaved changes. Save to highlight matching stories in this edition." : "词汇已修改，点击“保存并应用”后将立即标记当前日报中的匹配内容。"}';
+      }
+    }
+
     function saveKeywords() {
+      var validationError = keywordValidationError(input.value);
+      if (validationError) {
+        hint.textContent = validationError;
+        return [];
+      }
       var keywords = normalizeReaderKeywords(input.value);
       input.value = keywords.join('、');
-      try { localStorage.setItem('dailybrief.readerKeywords', input.value); } catch (_) {}
+      var persisted = false;
+      try {
+        if (input.value) localStorage.setItem('dailybrief.readerKeywords', input.value);
+        else localStorage.removeItem('dailybrief.readerKeywords');
+        persisted = true;
+      } catch (_) {}
+      var matches = applyKeywords(keywords);
+      if (!persisted) {
+        form.classList.add('dirty');
+        saveButton.disabled = false;
+        saveButton.textContent = '${REPORT_LOCALE === "en" ? "Retry save" : "重试保存"}';
+        hint.textContent = '${REPORT_LOCALE === "en" ? "Device storage is unavailable. The keywords are applied only until this page closes." : "本机存储不可用，词汇仅临时应用于当前页面；关闭页面后不会保留。"}';
+        return keywords;
+      }
+      savedValue = input.value;
       form.classList.add('saved');
       hint.textContent = keywords.length
-        ? '${REPORT_LOCALE === "en" ? "Saved on this device. These keywords will be used when personalized briefs are connected." : "已自动保存在本机。接入个性化日报后，将按这些词进行增量筛选。"}'
+        ? ('${REPORT_LOCALE === "en" ? "Saved on this device and applied to this edition: " : "已保存在本机，并应用到当前日报：匹配 "}' + matches + '${REPORT_LOCALE === "en" ? " stories." : " 条内容。"}')
         : '${REPORT_LOCALE === "en" ? "No custom keywords saved; the public brief rules remain active." : "未保存自定义词，将继续使用公共日报筛选原则。"}';
+      setCleanState();
       window.setTimeout(function () { form.classList.remove('saved'); }, 1600);
       return keywords;
     }
 
     form.addEventListener('submit', function (event) { event.preventDefault(); saveKeywords(); });
-    input.addEventListener('change', saveKeywords);
+    input.addEventListener('input', setDirtyState);
     document.addEventListener('dailybrief:tag-suggest', function (event) {
       var tag = event.detail && event.detail.tag ? String(event.detail.tag) : '';
       if (!tag) return;
       var keywords = normalizeReaderKeywords(input.value);
+      if (keywords.length >= 8) {
+        hint.textContent = '${REPORT_LOCALE === "en" ? "Up to 8 keywords are allowed. Remove one before adding another." : "最多保存 8 个词，请先删除一个词再添加。"}';
+        return;
+      }
       if (!keywords.some(function (item) { return item.toLocaleLowerCase() === tag.toLocaleLowerCase(); })) keywords.push(tag);
       input.value = normalizeReaderKeywords(keywords.join('、')).join('、');
-      saveKeywords();
+      setDirtyState();
+      hint.textContent = '${REPORT_LOCALE === "en" ? "Topic added. Save and apply it to this edition." : "已加入热点词“"}' + tag + '${REPORT_LOCALE === "en" ? "" : "”，点击“保存并应用”后生效。"}';
+      input.focus();
     });
     try {
       var savedKeywords = localStorage.getItem('dailybrief.readerKeywords');
       if (savedKeywords) input.value = normalizeReaderKeywords(savedKeywords).join('、');
     } catch (_) {}
+    savedValue = keywordValue();
+    input.value = savedValue;
+    applyKeywords(normalizeReaderKeywords(savedValue));
+    setCleanState();
 
   })();
 
@@ -3170,11 +3311,15 @@ export function renderHtml(
     var readingProgressBar = document.getElementById('readingProgressBar');
     var streamLoader = document.getElementById('streamLoader');
     var updateAvailable = document.getElementById('updateAvailable');
+    var streamNavigation = document.querySelector('.stream-navigation');
+    var mobileSubTabs = document.getElementById('mobileSubTabs');
+    var mobileSourceTabs = document.getElementById('mobileSourceTabs');
     var visibleCount = Math.min(batchSize, articles.length);
     var forcedPanelIndex = -1;
     var ticking = false;
     var activeCategoryId = '';
     var navigationTargetPanel = null;
+    var navigationTargetElement = null;
     var navigationTargetTimer = null;
 
     function syncDeferredContainers() {
@@ -3210,7 +3355,72 @@ export function renderHtml(
     }
 
     function topOffset() {
-      return window.innerWidth <= 640 ? 112 : 24;
+      if (window.innerWidth > 640 || !streamNavigation) return 24;
+      return Math.ceil(streamNavigation.getBoundingClientRect().height) + 8;
+    }
+
+    function syncStickyOffset() {
+      if (window.innerWidth <= 640) {
+        document.documentElement.style.setProperty('--mobile-stream-nav-height', topOffset() + 'px');
+      } else {
+        document.documentElement.style.removeProperty('--mobile-stream-nav-height');
+      }
+    }
+
+    function makeMobileNavButton(kind, target, id, category, label, count) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = kind + '-tab';
+      button.dataset.scrollTarget = target;
+      button.dataset.cat = category;
+      button.dataset[kind] = id;
+      button.textContent = label;
+      if (count) {
+        var badge = document.createElement('span');
+        badge.className = 'count';
+        badge.textContent = count;
+        button.appendChild(badge);
+      }
+      return button;
+    }
+
+    function replaceMobileStrip(strip, signature, buttons) {
+      if (!strip || strip.dataset.signature === signature) return;
+      strip.replaceChildren.apply(strip, buttons);
+      strip.dataset.signature = signature;
+    }
+
+    function syncMobileNavigation(section, sub) {
+      if (!section || !mobileSubTabs || !mobileSourceTabs) return;
+      var category = section.dataset.panel || '';
+      var subNodes = Array.from(section.querySelectorAll('.sub-content'));
+      var subButtons = subNodes.map(function (node) {
+        var id = node.dataset.subContent || '';
+        var countNode = node.querySelector('.stream-sub-heading > span');
+        return makeMobileNavButton('sub', node.id, id, node.dataset.cat || category, node.dataset.subLabel || id, countNode ? countNode.textContent || '' : '');
+      });
+      replaceMobileStrip(mobileSubTabs, category + ':' + subNodes.map(function (node) { return node.id; }).join(','), subButtons);
+
+      var activeSub = sub || subNodes[0] || null;
+      var sourceNodes = activeSub ? Array.from(activeSub.querySelectorAll('.source-content')) : [];
+      var sourceButtons = sourceNodes.map(function (node) {
+        var id = node.dataset.sourceContent || '';
+        var countNode = node.querySelector('.stream-source-heading span:last-child');
+        var button = makeMobileNavButton('source', node.id, id, node.dataset.cat || category, node.dataset.sourceLabel || id, countNode ? countNode.textContent || '' : '');
+        button.dataset.sub = activeSub ? activeSub.dataset.subContent || '' : '';
+        return button;
+      });
+      replaceMobileStrip(mobileSourceTabs, (activeSub ? activeSub.id : '') + ':' + sourceNodes.map(function (node) { return node.id; }).join(','), sourceButtons);
+      mobileSourceTabs.hidden = sourceButtons.length < 2;
+      requestAnimationFrame(syncStickyOffset);
+    }
+
+    function revealActiveButton(button) {
+      if (!button || window.innerWidth > 640) return;
+      var strip = button.parentElement;
+      if (!strip) return;
+      var left = button.offsetLeft - (strip.clientWidth - button.offsetWidth) / 2;
+      strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
     }
 
     function scrollToTarget(id) {
@@ -3221,7 +3431,11 @@ export function renderHtml(
         forcedPanelIndex = Math.max(forcedPanelIndex, sections.indexOf(targetPanel));
         navigationTargetPanel = targetPanel;
         if (navigationTargetTimer) clearTimeout(navigationTargetTimer);
-        navigationTargetTimer = setTimeout(function () { navigationTargetPanel = null; }, 1200);
+        navigationTargetElement = target;
+        navigationTargetTimer = setTimeout(function () {
+          navigationTargetPanel = null;
+          navigationTargetElement = null;
+        }, 1600);
       }
       var targetArticle = target.querySelector('.article');
       if (targetArticle) {
@@ -3233,6 +3447,7 @@ export function renderHtml(
       var top = target.getBoundingClientRect().top + window.scrollY - topOffset();
       window.scrollTo({ top: top, behavior: 'smooth' });
       try { history.replaceState(null, '', '#' + id); } catch (_) {}
+      updateReadingContext();
     }
 
     document.addEventListener('dailybrief:reveal-article', function (event) {
@@ -3248,10 +3463,9 @@ export function renderHtml(
       }, 0);
     });
 
-    document.querySelectorAll('[data-scroll-target]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        scrollToTarget(button.dataset.scrollTarget || '');
-      });
+    document.addEventListener('click', function (event) {
+      var button = event.target.closest && event.target.closest('[data-scroll-target]');
+      if (button) scrollToTarget(button.dataset.scrollTarget || '');
     });
 
     function currentVisibleSection() {
@@ -3270,6 +3484,12 @@ export function renderHtml(
 
     function currentVisibleArticle(section) {
       if (!section) return null;
+      if (navigationTargetElement && navigationTargetElement.closest('.stream-section') === section) {
+        var targetArticle = navigationTargetElement.matches('.article')
+          ? navigationTargetElement
+          : navigationTargetElement.querySelector('.article:not(.stream-pending)');
+        if (targetArticle) return targetArticle;
+      }
       var line = topOffset() + Math.min(180, window.innerHeight * 0.28);
       var visibleArticles = Array.from(section.querySelectorAll('.article:not(.stream-pending)'));
       var current = visibleArticles[0] || null;
@@ -3296,6 +3516,7 @@ export function renderHtml(
       var categoryLabel = section ? section.dataset.categoryLabel || '' : '';
       var subLabel = sub ? sub.dataset.subLabel || '' : '';
       var sourceLabel = source ? source.dataset.sourceLabel || '' : '';
+      syncMobileNavigation(section, sub);
       var tags = article ? (article.dataset.tags || '').split(',').filter(Boolean).slice(0, 2) : [];
       if (currentCategory) currentCategory.textContent = categoryLabel;
       if (currentSubcategory) currentSubcategory.textContent = [subLabel, sourceLabel].filter(Boolean).join(' · ');
@@ -3311,22 +3532,17 @@ export function renderHtml(
       if (categoryId && categoryId !== activeCategoryId) {
         activeCategoryId = categoryId;
         document.body.dataset.activeCategory = categoryId;
-        var activeCategoryTab = document.querySelector('.tabs > .tab[data-tab="' + categoryId + '"]');
-        if (activeCategoryTab && window.innerWidth <= 640) {
-          var tabStrip = activeCategoryTab.parentElement;
-          if (tabStrip) {
-            var centeredLeft = activeCategoryTab.offsetLeft - (tabStrip.clientWidth - activeCategoryTab.offsetWidth) / 2;
-            tabStrip.scrollTo({ left: Math.max(0, centeredLeft), behavior: 'smooth' });
-          }
-        }
+        revealActiveButton(document.querySelector('.tabs > .tab[data-tab="' + categoryId + '"]'));
       }
       document.querySelectorAll('.sub-tab').forEach(function (button) {
         button.classList.toggle('active', !!sub && button.dataset.sub === sub.dataset.subContent && button.dataset.cat === sub.dataset.cat);
       });
+      revealActiveButton(document.querySelector('#mobileSubTabs .sub-tab.active'));
       document.querySelectorAll('.source-tab').forEach(function (button) {
-        var active = !!source && button.dataset.source === source.dataset.sourceContent && button.dataset.sub === source.dataset.sub;
+        var active = !!source && button.dataset.source === source.dataset.sourceContent && button.dataset.sub === source.dataset.sub && button.dataset.cat === source.dataset.cat;
         button.classList.toggle('active', active || (!!sub && button.dataset.source === '__all__' && !sourceLabel));
       });
+      revealActiveButton(document.querySelector('#mobileSourceTabs .source-tab.active'));
       try {
         localStorage.setItem('dailybrief.reading.${date}', JSON.stringify({ url: article ? article.dataset.articleUrl || '' : '', index: Math.max(0, index), scrollY: window.scrollY }));
       } catch (_) {}
@@ -3410,7 +3626,7 @@ export function renderHtml(
     restoreReadingPosition();
     updateReadingContext();
     window.addEventListener('scroll', requestReadingUpdate, { passive: true });
-    window.addEventListener('resize', requestReadingUpdate);
+    window.addEventListener('resize', function () { syncStickyOffset(); requestReadingUpdate(); });
     window.setInterval(checkForNewEdition, 180000);
   })();
   document.querySelectorAll('.trading-group-tab').forEach(function (btn) {

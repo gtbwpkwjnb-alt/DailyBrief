@@ -10,7 +10,7 @@ import { filterFreshArticles } from "../lib/sources/freshness";
 import {
   createReviewUnavailableFallback,
   createReviewUnavailableFallbackArticles,
-  generateDailyReport,
+  buildDailyReportFromEnriched,
   hasHighRiskReviewContent,
   type ArticleInput,
   type DailyReport,
@@ -27,6 +27,7 @@ import {
   consolidatedEnrich,
   aiReview,
   looksLikeGarbledAiText,
+  isLowInformationHotSearch,
   type EnrichInput,
   type ReviewResult,
 } from "../lib/ai/enrich";
@@ -34,8 +35,10 @@ import {
   groupRaw,
   isSportsArticle,
   MERGED_SUBGROUP_LIMITS,
+  filterRawArticles,
   renderHtml,
   renderMarkdown,
+  visibleArticlesFromRaw,
 } from "../lib/output/render";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import type { FilterProfile, RunStats } from "../lib/output/render";
@@ -58,6 +61,7 @@ import { todayKey } from "../lib/utils";
 const OUTPUT_DIR = "daily_reports";
 const CACHE_DIR = ".cache";
 const LOG_DIR = "logs";
+const AI_ENRICHMENT_VERSION = 2;
 
 type FailedSource = { id: string; name: string; reason: string };
 
@@ -133,6 +137,29 @@ function hydrateArticleContext(articles: ArticleInput[], customKeywords: string[
     article.coverageCountries = detected.slice(0, 8);
     article.interestMatches = matchCustomKeywords(article, customKeywords);
   }
+}
+
+function needsArticleEnrichmentRepair(article: ArticleInput): boolean {
+  if (!article.displayTitle || !article.summary || !article.aiAnalysis) return true;
+  if (looksLikeGarbledAiText(article.summary) || looksLikeGarbledAiText(article.aiAnalysis)) return true;
+  return isLowInformationHotSearch(
+    {
+      sourceId: article.sourceId,
+      url: article.url,
+      title: article.title,
+      excerpt: article.excerpt,
+      source: article.source,
+    },
+    {
+      displayTitle: article.displayTitle,
+      summary: article.summary,
+      aiAnalysis: article.aiAnalysis,
+      tags: article.tags ?? [],
+      importance: article.importance ?? 5,
+      coverageCountries: article.coverageCountries ?? [],
+      interestMatches: article.interestMatches ?? [],
+    },
+  );
 }
 
 function writeSourceHealth(
@@ -758,6 +785,7 @@ async function main() {
   const cachedRun = loadRecentRun(date);
   const completeCachedReport = cachedRun
     && cachedRun.runStats?.freshArticles !== undefined
+    && cachedRun.runStats?.enrichmentVersion === AI_ENRICHMENT_VERSION
     && customKeywords.length === 0
     && fs.existsSync(path.join(dateDir, `${date}.json`))
     && fs.existsSync(path.join(dateDir, `${date}.html`));
@@ -891,17 +919,9 @@ async function main() {
   const visibleByCategory = new Map<string, ArticleInput[]>();
   const suppressedSummaryIssues: string[] = [];
   const suppressedUrls = new Set<string>();
+  const initiallyVisibleArticles = visibleArticlesFromRaw(visibleRaw);
   for (const category of Object.keys(visibleRaw) as Array<keyof typeof visibleRaw>) {
-    const seen = new Set<string>();
-    const visible = visibleRaw[category]
-      .flatMap((subgroup) => subgroup.sources)
-      .flatMap((source) => source.items)
-      .filter((article) => {
-        if (seen.has(article.url)) return false;
-        seen.add(article.url);
-        return true;
-      });
-    visibleByCategory.set(category, visible);
+    visibleByCategory.set(category, initiallyVisibleArticles.filter((article) => article.category === category));
   }
 
   const runStats: RunStats = {
@@ -913,14 +933,14 @@ async function main() {
     ...freshness.stats,
     generatedAt: new Date().toISOString(),
     mode: cachedRun ? "reuse" : "fresh",
+    enrichmentVersion: AI_ENRICHMENT_VERSION,
   };
   const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
     const items = visibleByCategory.get(cfg.key) ?? [];
     if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
     const targets = cachedRun
       ? items.filter((article) =>
-          !article.displayTitle
-          || !article.summary
+          needsArticleEnrichmentRepair(article)
           || (customKeywords.length > 0 && (article.interestMatches?.length ?? 0) > 0),
         )
       : items;
@@ -930,10 +950,10 @@ async function main() {
           article.summary = preserveTrendQuery(article.sourceId, article.title, article.summary);
         }
       }
-      const malformed = items.filter((article) => !article.displayTitle || !article.summary || looksLikeGarbledAiText(article.summary));
+      const malformed = items.filter(needsArticleEnrichmentRepair);
       if (malformed.length > 0) {
         malformed.forEach((article) => suppressedUrls.add(article.url));
-        suppressedSummaryIssues.push(`${cfg.label}屏蔽 ${malformed.length} 条摘要缺失或疑似乱码内容，已跳过并继续发布其它信息。`);
+        suppressedSummaryIssues.push(`${cfg.label}屏蔽 ${malformed.length} 条摘要缺失、低信息或疑似乱码内容，已跳过并继续发布其它信息。`);
         visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
       }
       const publishable = items.filter((article) => !suppressedUrls.has(article.url));
@@ -944,9 +964,10 @@ async function main() {
     const results = await consolidatedEnrich(
       cfg.label,
       targets.map((a) => ({
+        sourceId: a.sourceId,
         url: a.url,
         title: a.title,
-        excerpt: a.summary ?? a.excerpt,
+        excerpt: a.excerpt ?? a.summary,
         source: a.source,
         sourceCountry: a.sourceCountry,
         customKeywords,
@@ -959,6 +980,7 @@ async function main() {
       if (r?.displayTitle) {
         a.displayTitle = r.displayTitle;
         a.summary = r.summary;
+        a.aiAnalysis = r.aiAnalysis;
         a.tags = r.tags;
         a.importance = r.importance;
         const explicitCountries = detectCoverageCountries(`${a.title} ${a.excerpt ?? ""} ${a.summary ?? ""}`);
@@ -973,21 +995,18 @@ async function main() {
         article.summary = preserveTrendQuery(article.sourceId, article.title, article.summary);
       }
     }
-    const malformed = items.filter((article) => {
-      if (!article.displayTitle || !article.summary) return true;
-      return looksLikeGarbledAiText(article.summary);
-    });
+    const malformed = items.filter(needsArticleEnrichmentRepair);
     if (malformed.length > 0) {
       for (const article of malformed) {
         suppressedUrls.add(article.url);
       }
       suppressedSummaryIssues.push(
-        `${cfg.label}屏蔽 ${malformed.length} 条摘要缺失或疑似乱码内容，已跳过并继续发布其它信息。`,
+        `${cfg.label}屏蔽 ${malformed.length} 条摘要缺失、低信息或疑似乱码内容，已跳过并继续发布其它信息。`,
       );
       visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
     }
     const publishable = items.filter((article) => !suppressedUrls.has(article.url));
-    const enriched = publishable.filter((article) => article.displayTitle && article.summary).length;
+    const enriched = publishable.filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
     console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${publishable.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
     return { key: cfg.key, requested: publishable.length, enriched };
   }));
@@ -1006,11 +1025,11 @@ async function main() {
     articles.push(...retained);
   }
   runStats.suppressedArticles = suppressedUrls.size;
-  runStats.displayedArticles = Array.from(visibleByCategory.values())
-    .reduce((total, items) => total + items.length, 0);
-  runStats.aiEnrichedArticles = Array.from(visibleByCategory.values())
-    .flat()
-    .filter((article) => article.displayTitle && article.summary).length;
+  let raw = filterRawArticles(visibleRaw, (article) => !suppressedUrls.has(article.url));
+  const displayedArticles = visibleArticlesFromRaw(raw);
+  runStats.displayedArticles = displayedArticles.length;
+  runStats.aiEnrichedArticles = displayedArticles
+    .filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
   console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
   // Phase 5: Trading signals (optional, non-fatal)
@@ -1023,15 +1042,13 @@ async function main() {
     console.warn(`[daily] trading section failed: ${e instanceof Error ? e.message : e}`);
   }
 
-  // Phase 6: Generate digest (hero headlines + briefs + keywords)
-  console.log(`[daily] generating digest with ${getModelTag()}…`);
-  const digestT0 = Date.now();
-  let { report } = await generateDailyReport(articles);
+  // Phase 6: Build metadata from the exact web-visible, already-enriched set.
+  // This avoids a duplicate LLM digest call over content the card pass already processed.
+  console.log(`[daily] composing digest metadata from ${displayedArticles.length} visible articles…`);
+  let report = buildDailyReportFromEnriched(displayedArticles);
   if (trading) report.trading = trading;
-  console.log(`[daily] digest ready in ${((Date.now() - digestT0) / 1000).toFixed(1)}s`);
 
   const base = path.join(dateDir, date);
-  let raw = groupRaw(articles, sources, { customKeywords });
 
   // Phase 7: Deterministic category summaries from already-enriched visible
   // items. This avoids five additional LLM calls and keeps the overview tied
@@ -1047,7 +1064,7 @@ async function main() {
       ["cn-community", "overseas-community", "blog-weekly"].includes(sourceSubcat.get(a.sourceId) ?? "") },
   ];
   for (const cfg of SUMMARY_CONFIG) {
-    const items = articles
+    const items = displayedArticles
       .filter((a) => cfg.filter(a) && !!a.summary)
       .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))
       .slice(0, 3);
@@ -1065,7 +1082,7 @@ async function main() {
   const reviewT0 = Date.now();
   const reviewInput = CATEGORY_CONFIG.map((cfg) => {
     const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
-    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}`);
+    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}；AI评价：${a.aiAnalysis ?? "未生成"}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);

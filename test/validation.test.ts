@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
-import { aiReview, hasUnsupportedHighRiskClaim, looksLikeGarbledAiText } from "../lib/ai/enrich";
-import { createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
+import { aiReview, consolidatedEnrich, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText } from "../lib/ai/enrich";
+import { buildDailyReportFromEnriched, createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
-import { safeExternalUrl } from "../lib/output/render";
+import { filterRawArticles, groupRaw, safeExternalUrl, visibleArticlesFromRaw } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
 import { parseFreshRssItems, parseMinifluxEntries } from "../lib/sources/reader";
+import { parseGoogleTrendsXml } from "../lib/sources/google-trends";
 import { configuredFreshnessHours, filterFreshArticles } from "../lib/sources/freshness";
 import { detectCoverageCountries, normalizeCustomKeywords, preserveTrendQuery } from "../lib/editorial/context";
+import { sources } from "../lib/sources/registry";
 
 test("safeExternalUrl only permits HTTP(S) links", () => {
   assert.equal(safeExternalUrl("https://example.com/news"), "https://example.com/news");
@@ -98,6 +100,7 @@ test("consolidated result ignores unrequested URLs and applies defaults", () => 
   assert.deepEqual(result.get("https://example.com/a"), {
     displayTitle: undefined,
     summary: "summary",
+    aiAnalysis: undefined,
     tags: [],
     importance: 5,
     coverageCountries: [],
@@ -108,9 +111,157 @@ test("consolidated result ignores unrequested URLs and applies defaults", () => 
 
 test("consolidated result preserves the translated display title", () => {
   const result = parseConsolidatedResult({
-    items: [{ url: "https://example.com/a", displayTitle: "中文标题", summary: "中文摘要" }],
+    items: [{
+      url: "https://example.com/a",
+      displayTitle: "中文标题",
+      summary: "中文摘要",
+      aiAnalysis: "这项变化可能降低用户的迁移成本，但长期影响仍取决于后续采用率。",
+    }],
   }, ["https://example.com/a"]);
   assert.equal(result.get("https://example.com/a")?.displayTitle, "中文标题");
+  assert.equal(
+    result.get("https://example.com/a")?.aiAnalysis,
+    "这项变化可能降低用户的迁移成本，但长期影响仍取决于后续采用率。",
+  );
+});
+
+test("one consolidated AI call returns both the displayed summary and AI analysis", async () => {
+  const calls: Array<{ userPrompt: string }> = [];
+  const result = await consolidatedEnrich("技术动态", [{
+    url: "https://example.com/visible",
+    title: "Visible article",
+    excerpt: "The source describes a concrete product update.",
+  }], {
+    run: async (request) => {
+      calls.push({ userPrompt: request.userPrompt });
+      return {
+        durationMs: 1,
+        text: JSON.stringify({
+          items: [{
+            url: "https://example.com/visible",
+            displayTitle: "产品更新带来新能力",
+            summary: "该产品公布了已在原文说明的新功能更新。",
+            aiAnalysis: "这可能降低目标用户的使用门槛，但实际价值仍取决于后续采用和稳定性。",
+            tags: ["科技", "产品"],
+            importance: 5,
+            coverageCountries: [],
+            interestMatches: [],
+          }],
+        }),
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.userPrompt, /"summary"/);
+  assert.match(calls[0]!.userPrompt, /"aiAnalysis"/);
+  assert.equal(result.get("https://example.com/visible")?.summary, "该产品公布了已在原文说明的新功能更新。");
+  assert.equal(result.get("https://example.com/visible")?.aiAnalysis, "这可能降低目标用户的使用门槛，但实际价值仍取决于后续采用和稳定性。");
+});
+
+test("final web set never backfills an article that was outside the AI target set", () => {
+  const candidates = Array.from({ length: 15 }, (_, index) => ({
+    sourceId: "github-trending",
+    source: "GitHub Trending",
+    title: `Project ${index + 1}`,
+    url: `https://example.com/project-${index + 1}`,
+    category: "tech" as const,
+  }));
+  const initiallyVisible = groupRaw(candidates, sources);
+  const aiTargets = visibleArticlesFromRaw(initiallyVisible);
+  assert.equal(aiTargets.length, 14);
+  assert.equal(aiTargets.some((article) => article.url.endsWith("project-15")), false);
+
+  const finalRaw = filterRawArticles(initiallyVisible, (article) => article !== aiTargets[0]);
+  const finalVisible = visibleArticlesFromRaw(finalRaw);
+  assert.equal(finalVisible.length, 13);
+  assert.equal(finalVisible.every((article) => aiTargets.includes(article)), true);
+  assert.equal(finalVisible.some((article) => article.url.endsWith("project-15")), false);
+});
+
+test("digest metadata is derived only from the enriched web-visible articles", () => {
+  const displayed = [{
+    sourceId: "github-trending",
+    source: "GitHub Trending",
+    title: "Visible source title",
+    displayTitle: "前端展示标题",
+    url: "https://example.com/visible",
+    category: "tech" as const,
+    summary: "这是已经在前端显示的精炼摘要。",
+    aiAnalysis: "该变化可能影响开发者采用路径，但仍需观察实际使用数据。",
+    importance: 8,
+    tags: ["科技", "开发工具"],
+  }];
+  const report = buildDailyReportFromEnriched(displayed);
+
+  assert.equal(report.hero_headline, "前端展示标题");
+  assert.equal(report.tech_briefs[0]?.url, "https://example.com/visible");
+  assert.match(report.daily_overview, /前端显示的精炼摘要/);
+  assert.deepEqual(report.keywords, ["开发工具", "科技"]);
+});
+
+test("Google Trends XML uses related reporting as context and the concrete source URL", () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+    <rss xmlns:ht="https://trends.google.com/trending/rss"><channel><item>
+      <title>kyle tucker</title>
+      <link>https://trends.google.com/trending/rss?geo=US</link>
+      <pubDate>Fri, 24 Jul 2026 12:00:00 GMT</pubDate>
+      <ht:approx_traffic>200K+</ht:approx_traffic>
+      <ht:news_item>
+        <ht:news_item_title>Cubs complete trade involving Kyle Tucker</ht:news_item_title>
+        <ht:news_item_url>https://sports.example.com/kyle-tucker-trade</ht:news_item_url>
+        <ht:news_item_source>Example Sports</ht:news_item_source>
+      </ht:news_item>
+      <ht:news_item>
+        <ht:news_item_title>What the move means for the playoff race</ht:news_item_title>
+        <ht:news_item_url>https://analysis.example.com/playoff-race</ht:news_item_url>
+        <ht:news_item_source>Analysis Desk</ht:news_item_source>
+      </ht:news_item>
+    </item></channel></rss>`;
+
+  const articles = parseGoogleTrendsXml(
+    "google-trends-us",
+    "https://trends.google.com/trending/rss?geo=US",
+    xml,
+  );
+
+  assert.equal(articles.length, 1);
+  assert.equal(articles[0]?.title, "kyle tucker");
+  assert.equal(articles[0]?.url, "https://sports.example.com/kyle-tucker-trade");
+  assert.match(articles[0]?.excerpt ?? "", /搜索量约 200K\+/);
+  assert.match(articles[0]?.excerpt ?? "", /Cubs complete trade involving Kyle Tucker（Example Sports）/);
+  assert.match(articles[0]?.excerpt ?? "", /What the move means for the playoff race（Analysis Desk）/);
+  assert.equal(articles[0]?.publishedAt?.toISOString(), "2026-07-24T12:00:00.000Z");
+});
+
+test("low-information hot-search enrichment is rejected while evidence-based context passes", () => {
+  const item = {
+    sourceId: "google-trends-us",
+    title: "kyle tucker",
+    url: "https://sports.example.com/kyle-tucker-trade",
+    excerpt: "搜索量约 200K+；关联报道：Cubs complete trade involving Kyle Tucker（Example Sports）",
+  };
+  const base = {
+    displayTitle: "凯尔·塔克交易引发关注",
+    aiAnalysis: "这笔交易可能改变球队季后赛竞争力，并影响同位置球员的后续市场估值。",
+    tags: ["棒球"],
+    importance: 5,
+    coverageCountries: ["美国"],
+    interestMatches: [],
+  };
+
+  assert.equal(isLowInformationHotSearch(item, {
+    ...base,
+    summary: "凯尔·塔克成为美国谷歌热搜话题，搜索热度上升。",
+  }), true);
+  assert.equal(isLowInformationHotSearch(item, {
+    ...base,
+    summary: "搜索词指向棒球运动员凯尔·塔克，因球队交易报道集中发布而在美国搜索热度上升。",
+  }), false);
+  assert.equal(isLowInformationHotSearch({ ...item, excerpt: "搜索量 200K+" }, {
+    ...base,
+    summary: "搜索词指向棒球运动员凯尔·塔克，因球队交易报道集中发布而在美国搜索热度上升。",
+  }), true);
 });
 
 test("report sidecar validates data and restores publication timestamps", () => {
@@ -123,6 +274,7 @@ test("report sidecar validates data and restores publication timestamps", () => 
       url: "https://example.com/a",
       category: "tech",
       cnSummary: "旧版中文摘要",
+      aiAnalysis: "该变化可能扩大产品覆盖，但仍需观察实际采用率。",
       publishedAt: "2026-07-10T08:00:00.000Z",
       priorityLevel: "P1",
       reasonCodes: ["MULTI_SOURCE_CONFIRMED"],
@@ -157,6 +309,7 @@ test("report sidecar validates data and restores publication timestamps", () => 
       freshArticles: 1,
       displayedArticles: 1,
       aiEnrichedArticles: 1,
+      enrichmentVersion: 2,
       generatedAt: "2026-07-10T08:00:00.000Z",
       mode: "fresh",
     },
@@ -166,10 +319,12 @@ test("report sidecar validates data and restores publication timestamps", () => 
   assert.ok(sidecar.articles[0].sourceRefs?.[0]?.fetchedAt instanceof Date);
   assert.equal(sidecar.articles[0].priorityLevel, "P1");
   assert.equal(sidecar.articles[0].summary, "旧版中文摘要");
+  assert.equal(sidecar.articles[0].aiAnalysis, "该变化可能扩大产品覆盖，但仍需观察实际采用率。");
   assert.equal(sidecar.qualityReview?.passed, true);
   assert.equal(sidecar.qualityReview?.summary, "Quality gates passed.");
   assert.equal(sidecar.runStats?.displayedArticles, 1);
   assert.equal(sidecar.runStats?.aiEnrichedArticles, 1);
+  assert.equal(sidecar.runStats?.enrichmentVersion, 2);
   assert.throws(() => parseReportSidecar({ date: "invalid", articles: [] }));
 });
 
@@ -280,5 +435,6 @@ test("reviewer outage fallback is source-only and excludes high-risk content", (
   assert.doesNotMatch(fallback.tech_briefs[0]!.summary, /AI-written summary/);
   assert.equal(safeArticles[0]!.displayTitle, lowRisk.title);
   assert.doesNotMatch(safeArticles[0]!.summary ?? "", /AI-written summary/);
+  assert.match(safeArticles[0]!.aiAnalysis ?? "", /AI 分析暂不可用|AI analysis is unavailable/i);
   assert.equal(hasHighRiskReviewContent({ ...lowRisk, title: "Official says minister resigned" }), true);
 });
