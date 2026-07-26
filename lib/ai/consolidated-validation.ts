@@ -4,6 +4,7 @@ const consolidatedItemSchema = z.object({
   url: z.url(),
   displayTitle: z.string().trim().min(1).optional(),
   summary: z.string().trim().min(1),
+  aiAnalysis: z.string().trim().min(1).optional(),
   tags: z.array(z.string().trim().min(1)).default([]),
   importance: z.number().finite().min(1).max(10).default(5),
   coverageCountries: z.array(z.string().trim().min(1)).max(8).default([]),
@@ -17,6 +18,7 @@ const consolidatedResultSchema = z.object({
 export type ConsolidatedValue = {
   displayTitle?: string;
   summary: string;
+  aiAnalysis?: string;
   tags: string[];
   importance: number;
   coverageCountries: string[];
@@ -36,6 +38,7 @@ export function parseConsolidatedResult(
     result.set(item.url, {
       displayTitle: item.displayTitle,
       summary: item.summary,
+      aiAnalysis: item.aiAnalysis,
       tags: item.tags,
       importance: item.importance,
       coverageCountries: item.coverageCountries,

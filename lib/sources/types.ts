@@ -123,6 +123,8 @@ export interface RawArticle {
    * for en reports it'd be the English summary of a non-English source.
    */
   summary?: string;
+  /** One-sentence AI interpretation of impact, implications, or uncertainty. */
+  aiAnalysis?: string;
   /**
    * LLM-generated title in the active report locale. The original feed title
    * remains intact for deduplication, attribution, and the outbound link.

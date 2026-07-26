@@ -3,14 +3,32 @@ import { parseConsolidatedResult, type ConsolidatedValue } from "./consolidated-
 import { runLlm } from "./llm";
 import { extractJson } from "./json-util";
 import { REPORT_LOCALE } from "../sources/registry";
+import { isHotSearchArticle } from "../editorial/context";
 
 export interface EnrichInput {
+  sourceId?: string;
   url: string;
   title: string;
   excerpt?: string;
   source?: string;
   sourceCountry?: string;
   customKeywords?: string[];
+}
+
+/** Detect output that is visibly garbled or violates the configured output locale. */
+export function looksLikeGarbledAiText(value: string | undefined): boolean {
+  const text = value?.trim() ?? "";
+  if (!text) return false;
+  if (/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)) return true;
+  if (/(?:\?{3,}|\u951f\u65a4\u62f7|\u00c3|\u00c2|\u00e2)/.test(text)) return true;
+
+  // Chinese editions must not silently publish an untranslated all-English summary.
+  if (REPORT_LOCALE === "zh") {
+    const cjk = (text.match(/[\u3400-\u9FFF]/g) ?? []).length;
+    const letters = (text.match(/[A-Za-z]/g) ?? []).length;
+    if (text.length >= 36 && cjk === 0 && letters >= 24) return true;
+  }
+  return false;
 }
 
 const GH_SYSTEM_PROMPT_ZH = `你是一名技术编辑，负责为 GitHub Trending 项目写中文介绍。
@@ -779,7 +797,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 
 输入：每条包含 url、title、excerpt（可能的原文）、source（来源）和 category（分类）。
 
-任务：对每一条目执行以下三项操作：
+任务：对每一条目执行以下七项操作：
 
 **1. 精炼摘要（必需）**
 - title 和 excerpt 是唯一事实依据；只能重述输入明确提供的信息，不得根据人物常识、外部知识或标题联想补充事实
@@ -788,27 +806,35 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
 - GitHub 项目 → 说明项目做什么、用什么技术、解决什么问题
 - X 推文 → 不照搬标题党 title，以内容为准确认博主的分享点
 - 论文 → 说明解决的问题、方法、关键结果
-- Google/微博/百度热搜关键词 → 翻译为中文并说明搜索热度；只能写“热搜词/搜索热度”，不能把关键词改写成已经确认发生的赛事、比分或事件
+- Google/微博/百度热搜关键词 → 必须回答原始搜索词指什么、来自哪个地区/平台、关联报道或输入背景是什么、为什么在此时走红。禁止只写“成为热搜”“搜索热度上升”
+- 热搜走红原因只能依据 excerpt 中的关联报道或描述；证据不足时明确标记信息不足，不得凭常识猜测
 - 即使信息不足，也至少有标题的中文翻译，**不允许遗漏任何条目**
 - 原文没有提供死亡、逮捕、比分、日期、辞职、停火等细节时，绝对不要写出这些结论
 
-**2. 中文展示标题（必需）**
+**2. AI 启发式评价（必需）**
+- aiAnalysis 用一句 35-70 字中文完成，不重复摘要
+- 从用户相关性、行业/市场影响、技术扩散、社会行为、风险与不确定性中选择 1-2 个最有价值维度
+- 推断必须使用“可能、意味着、值得关注”等边界词，不得把推断写成事实
+
+**3. 中文展示标题（必需）**
 - displayTitle 必须是 12-30 字的中文标题，准确翻译或改写输入 title
 - 产品名、公司名、模型名可保留英文；不要保留整句英文标题
 
-**3. 内容标签（必需）**
+**4. 内容标签（必需）**
 - 分配 3-5 个内容标签，前 1-2 个为基础分类（政治/经济/科技/体育/娱乐/军事/社会/教育/健康/环境/国际/财经/文化），后 2-3 个为具体内容标签
 - 标签从广到窄排序
 - 纯中文，不需要空格
 
-**4. 重要度评分（必需）**
-- 1-10 分，10 为最重要。基于：新闻影响力、时效性、与目标读者的相关性
+**5. 重要度评分（必需）**
+- 1-10 分，作为编辑排序参考，不代表事实可信度；综合新闻影响力、时效性、与目标读者的相关性
+- 1-3：影响范围有限、信息不足或与读者弱相关；4-6：一般行业动态或区域性关注；7-8：对较多读者有明确、近期影响；9-10：罕见，仅用于已由输入明确支持的重大、广泛且紧迫事件
+- Google/微博/百度热搜仅表示关注度变化，上榜本身不得高于 5 分；只有输入明确给出广泛现实影响时才能提高
 
-**5. 国际时政归属（必需）**
+**6. 国际时政归属（必需）**
 - coverageCountries 只能填写标题或原文明确提到的国家/地区，最多 4 个；没有明确提及时返回空数组
 - sourceCountry 是媒体所属国，不等于 coverageCountries；不要把媒体所属国当成新闻发生国
 
-**6. 用户兴趣增量（必需）**
+**7. 用户兴趣增量（必需）**
 - interestMatches 只能从输入 customKeywords 原样选择明确相关的关键词，没有命中则返回空数组
 
 输出严格 JSON 对象，不要 markdown 包裹：
@@ -818,6 +844,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_ZH = `你是一名AI编辑，负责对新闻资
       "url": "<原 url，精确复制>",
       "displayTitle": "<12-30 字中文标题>",
       "summary": "<50-90 字中文精炼摘要>",
+      "aiAnalysis": "<35-70 字中文启发式评价>",
       "tags": ["科技", "AI", "开源模型"],
       "importance": 7,
       "coverageCountries": [],
@@ -833,7 +860,7 @@ const CONSOLIDATED_SYSTEM_PROMPT_EN = `You are an AI editor producing English-op
 
 Input: each item has url, title, excerpt, source, and category.
 
-Task: for each item, do ALL three:
+Task: for each item, do all seven:
 
 **1. Refined summary (required)**
 - title and excerpt are the sole evidence; restate only information explicitly present in them, never add outside knowledge or infer facts from a name
@@ -843,26 +870,34 @@ Task: for each item, do ALL three:
 - GitHub repos → what it does, tech, problem solved
 - X posts → ignore clickbait title, extract the actual claim
 - Papers → problem, method, key result
-- Google Trends / hot-search keywords → explain search interest; never turn a keyword into a verified event, competition result, score, or date
+- Google Trends / hot-search keywords → identify what the query means, its region/platform, the associated report or input context, and why interest is rising now. Never output only that it is trending
+- Infer a trend cause only from the supplied excerpt or associated coverage; state when evidence is insufficient
 - **Do NOT skip any item. Every item must have a summary.**
 - If the input does not state a death, arrest, score, date, resignation, or ceasefire, do not assert one.
 
-**2. Display title (required)**
+**2. One-sentence AI analysis (required)**
+- aiAnalysis must be 25-55 words and must not repeat the summary
+- Select 1-2 useful dimensions: user relevance, industry/market impact, technology diffusion, social behavior, risk, or uncertainty
+- Mark inference with boundary language such as may, suggests, or worth watching
+
+**3. Display title (required)**
 - displayTitle must be a concise 8-16 word title in English
 - Translate non-English titles; retain product, company, and model names where appropriate
 
-**3. Content tags (required)**
+**4. Content tags (required)**
 - 3-5 tags per item: 1-2 base category (Politics/Economy/Technology/Sports/Entertainment/Military/Society/Education/Health/Environment/International/Finance/Culture) + 2-3 specific tags
 - Order: broad to narrow
 
-**4. Importance score (required)**
-- 1-10, 10 = most important. Based on: impact, timeliness, relevance
+**5. Importance score (required)**
+- 1-10 editorial ranking aid, not factual confidence; combine impact, timeliness, and reader relevance
+- 1-3: limited reach, sparse information, or weak relevance; 4-6: routine industry or regional interest; 7-8: clear recent impact on many readers; 9-10: rare, only for major, broad, urgent events explicitly supported by the input
+- A Google or social hot-search ranking is only an attention signal and must not score above 5 by itself; raise it only when the input explicitly supports broad real-world impact
 
-**5. World-news geography (required)**
+**6. World-news geography (required)**
 - coverageCountries may contain only countries or regions explicitly present in the title or source text, max 4; use [] when unclear
 - sourceCountry is the publisher's country and is not the same as coverageCountries
 
-**6. Incremental user interest (required)**
+**7. Incremental user interest (required)**
 - interestMatches may only copy clearly relevant values from the input customKeywords; use [] when none match
 
 Output STRICTLY a JSON object, no markdown:
@@ -872,6 +907,7 @@ Output STRICTLY a JSON object, no markdown:
       "url": "<exact url from input>",
       "displayTitle": "<8-16 word English title>",
       "summary": "<50-90 word English summary>",
+      "aiAnalysis": "<25-55 word one-sentence analysis>",
       "tags": ["Technology", "AI", "open-source"],
       "importance": 7,
       "coverageCountries": [],
@@ -889,11 +925,37 @@ const CONSOLIDATED_PROMPTS =
 type ConsolidatedEnrichment = {
   displayTitle?: string;
   summary: string;
+  aiAnalysis?: string;
   tags: string[];
   importance: number;
   coverageCountries: string[];
   interestMatches: string[];
 };
+
+type ConsolidatedEnrichOptions = {
+  customKeywords?: string[];
+  /** Test seam; production uses the configured LLM dispatcher. */
+  run?: typeof runLlm;
+};
+
+export function isLowInformationHotSearch(item: EnrichInput, value: ConsolidatedEnrichment): boolean {
+  if (!item.sourceId || !isHotSearchArticle(item.sourceId)) return false;
+  const context = item.excerpt?.trim() ?? "";
+  const summary = value.summary.trim();
+  if (context.length < 20) return true;
+  if (/暂无具体内容|具体原因待核验|仅确认搜索热度|成为.{0,12}热搜(?:话题|词)?[，。；]?搜索热度上升?/.test(summary)) return true;
+  return summary.length < 35
+    || !/(?:因|由于|源于|关联|围绕|报道|发布|比赛|交易|事件|争议|节目|政策|产品|声明|调查)/.test(summary);
+}
+
+function needsConsolidatedRepair(item: EnrichInput, value: ConsolidatedEnrichment | undefined): boolean {
+  return !value?.displayTitle
+    || !value.summary
+    || !value.aiAnalysis
+    || looksLikeGarbledAiText(value.summary)
+    || looksLikeGarbledAiText(value.aiAnalysis)
+    || isLowInformationHotSearch(item, value);
+}
 
 /**
  * One-pass enrichment for a batch of articles in the same category.
@@ -907,7 +969,7 @@ type ConsolidatedEnrichment = {
 export async function consolidatedEnrich(
   categoryLabel: string,
   items: EnrichInput[],
-  options: { customKeywords?: string[] } = {},
+  options: ConsolidatedEnrichOptions = {},
 ): Promise<Map<string, ConsolidatedEnrichment>> {
   if (items.length === 0) return new Map();
 
@@ -922,6 +984,7 @@ export async function consolidatedEnrich(
   }
 
   const result = new Map<string, ConsolidatedEnrichment>();
+  const run = options.run ?? runLlm;
   const merge = (values: Map<string, ConsolidatedEnrichment>) => {
     for (const [url, value] of values) result.set(url, value);
   };
@@ -936,6 +999,7 @@ export async function consolidatedEnrich(
     "",
     `以下为今日「${categoryLabel}」板块的 ${items.length} 条条目：`,
     JSON.stringify(items.map((it) => ({
+      sourceId: it.sourceId ?? "",
       url: it.url,
       title: it.title,
       excerpt: (it.excerpt ?? "").slice(0, 250),
@@ -945,13 +1009,13 @@ export async function consolidatedEnrich(
       category: categoryLabel,
     }))),
     "",
-    `请输出 {"items": [{"url": "...", "displayTitle": "...", "summary": "...", "tags": [...], "importance": N, "coverageCountries": [], "interestMatches": []}, ...]}`,
+    `请输出 {"items": [{"url": "...", "displayTitle": "...", "summary": "...", "aiAnalysis": "...", "tags": [...], "importance": N, "coverageCountries": [], "interestMatches": []}, ...]}`,
     `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
   ].join("\n");
 
   // Retry the full batch once, then recover missing URLs in smaller batches.
   try {
-    merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel));
+    merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel, run));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[enrich] consolidated "${categoryLabel}" attempt 1 failed: ${msg} — retrying in 10s…`);
@@ -960,31 +1024,48 @@ export async function consolidatedEnrich(
   if (result.size === 0) {
     await new Promise((r) => setTimeout(r, 10_000));
     try {
-      merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel));
+      merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel, run));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn(`[enrich] consolidated "${categoryLabel}" attempt 2 also failed: ${msg}`);
     }
   }
 
-  const missing = items.filter((item) => {
-    const value = result.get(item.url);
-    return !value?.displayTitle || !value.summary;
-  });
+  const missing = items.filter((item) => needsConsolidatedRepair(item, result.get(item.url)));
   for (let i = 0; i < missing.length; i += 10) {
     const batch = missing.slice(i, i + 10);
     const batchPrompt = buildConsolidatedPrompt(categoryLabel, batch, langHeader, options);
     try {
-      merge(await runConsolidatedOnce(batch, CONSOLIDATED_PROMPTS, batchPrompt, `${categoryLabel}-recovery`));
+      merge(await runConsolidatedOnce(batch, CONSOLIDATED_PROMPTS, batchPrompt, `${categoryLabel}-recovery`, run));
     } catch (e) {
       console.warn(`[enrich] consolidated "${categoryLabel}" recovery batch failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // A response can be valid JSON while still containing an untranslated or
+  // visibly garbled summary. Retry only those items up to three times; the
+  // caller can suppress the item after the bounded recovery budget is spent.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const malformed = items.filter((item) => needsConsolidatedRepair(item, result.get(item.url)));
+    if (malformed.length === 0) break;
+    const repairPrompt = [
+      buildConsolidatedPrompt(categoryLabel, malformed, langHeader, options),
+      REPORT_LOCALE === "en"
+        ? "This is a repair attempt. Replace every missing, untranslated, garbled, or low-information field. A hot-search summary must explain the query, context, and evidence-backed cause; aiAnalysis must add a distinct implication."
+        : "这是定向修复尝试。请修复缺失、未翻译、乱码或低信息字段；热搜摘要必须解释词义、关联背景和有证据的走红原因，aiAnalysis 必须给出不重复摘要的影响判断。",
+    ].join("\n\n");
+    try {
+      merge(await runConsolidatedOnce(malformed, CONSOLIDATED_PROMPTS, repairPrompt, `${categoryLabel}-garbled-repair-${attempt}`, run));
+      console.log(`[enrich] consolidated "${categoryLabel}" garbled repair ${attempt}/3: ${malformed.length} item(s)`);
+    } catch (e) {
+      console.warn(`[enrich] consolidated "${categoryLabel}" garbled repair ${attempt}/3 failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   return result;
 }
 
-function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], langHeader: string, options: { customKeywords?: string[] } = {}): string {
+function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], langHeader: string, options: ConsolidatedEnrichOptions = {}): string {
   return [
     langHeader,
     "",
@@ -993,6 +1074,7 @@ function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], la
       : "每个 item 必须包含 displayTitle、summary、tags、importance。",
     `以下为今日「${categoryLabel}」板块的 ${items.length} 条条目：`,
     JSON.stringify(items.map((it) => ({
+      sourceId: it.sourceId ?? "",
       url: it.url,
       title: it.title,
       excerpt: (it.excerpt ?? "").slice(0, 250),
@@ -1002,7 +1084,7 @@ function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], la
       category: categoryLabel,
     }))),
     "",
-    `请输出 {"items": [{"url": "...", "displayTitle": "...", "summary": "...", "tags": [...], "importance": N, "coverageCountries": [], "interestMatches": []}, ...]}`,
+    `请输出 {"items": [{"url": "...", "displayTitle": "...", "summary": "...", "aiAnalysis": "...", "tags": [...], "importance": N, "coverageCountries": [], "interestMatches": []}, ...]}`,
     `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
   ].join("\n");
 }
@@ -1012,10 +1094,11 @@ async function runConsolidatedOnce(
   systemPrompt: string,
   userPrompt: string,
   scope: string,
+  run: typeof runLlm,
 ): Promise<Map<string, ConsolidatedEnrichment>> {
   const result = new Map<string, ConsolidatedEnrichment>();
 
-  const { text } = await runLlm({
+  const { text } = await run({
     systemPrompt,
     userPrompt,
     timeoutMs: 120_000, // 2 min for large batches
@@ -1083,7 +1166,7 @@ const HIGH_RISK_EVIDENCE_RULES: Array<{ output: RegExp; source: RegExp; label: s
 ];
 
 export function hasUnsupportedHighRiskClaim(item: EnrichInput, value: ConsolidatedValue): string | null {
-  const output = `${value.displayTitle ?? ""} ${value.summary}`;
+  const output = `${value.displayTitle ?? ""} ${value.summary} ${value.aiAnalysis ?? ""}`;
   const source = `${item.title} ${item.excerpt ?? ""}`;
   for (const rule of HIGH_RISK_EVIDENCE_RULES) {
     if (rule.output.test(output) && !rule.source.test(source)) return rule.label;
@@ -1095,11 +1178,14 @@ function evidenceFallback(item: EnrichInput, label: string): ConsolidatedValue {
   const sourceTitle = item.title.trim();
   const summary = REPORT_LOCALE === "en"
     ? "The source does not provide verifiable " + label + " evidence. Title retained for manual review: " + sourceTitle
-    : "?????????" + label + "????????????" + sourceTitle;
+    : "原文未提供可核验的" + label + "证据，标题保留供人工复核：" + sourceTitle;
   return {
-    displayTitle: REPORT_LOCALE === "en" ? sourceTitle : "????" + sourceTitle,
+    displayTitle: REPORT_LOCALE === "en" ? sourceTitle : "待核验：" + sourceTitle,
     summary,
-    tags: ["???"],
+    aiAnalysis: REPORT_LOCALE === "en"
+      ? "The missing source evidence limits any impact assessment; verify the original report before acting on this item."
+      : "原文证据不足会显著限制影响判断，采取行动前应先核验来源正文。",
+    tags: REPORT_LOCALE === "en" ? ["manual review"] : ["待核验"],
     importance: 3,
     coverageCountries: [],
     interestMatches: [],

@@ -10,7 +10,7 @@ import { filterFreshArticles } from "../lib/sources/freshness";
 import {
   createReviewUnavailableFallback,
   createReviewUnavailableFallbackArticles,
-  generateDailyReport,
+  buildDailyReportFromEnriched,
   hasHighRiskReviewContent,
   type ArticleInput,
   type DailyReport,
@@ -26,6 +26,8 @@ import {
   enrichContentTags,
   consolidatedEnrich,
   aiReview,
+  looksLikeGarbledAiText,
+  isLowInformationHotSearch,
   type EnrichInput,
   type ReviewResult,
 } from "../lib/ai/enrich";
@@ -33,8 +35,10 @@ import {
   groupRaw,
   isSportsArticle,
   MERGED_SUBGROUP_LIMITS,
+  filterRawArticles,
   renderHtml,
   renderMarkdown,
+  visibleArticlesFromRaw,
 } from "../lib/output/render";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import type { FilterProfile, RunStats } from "../lib/output/render";
@@ -44,6 +48,8 @@ import {
   detectCoverageCountries,
   matchCustomKeywords,
   normalizeCustomKeywords,
+  isHotSearchArticle,
+  preserveTrendQuery,
 } from "../lib/editorial/context";
 import { analyzeWatchlist } from "../lib/trading/runner";
 import { fetchCryptoFearGreed } from "../lib/trading/fear-greed";
@@ -55,6 +61,7 @@ import { todayKey } from "../lib/utils";
 const OUTPUT_DIR = "daily_reports";
 const CACHE_DIR = ".cache";
 const LOG_DIR = "logs";
+const AI_ENRICHMENT_VERSION = 2;
 
 type FailedSource = { id: string; name: string; reason: string };
 
@@ -130,6 +137,29 @@ function hydrateArticleContext(articles: ArticleInput[], customKeywords: string[
     article.coverageCountries = detected.slice(0, 8);
     article.interestMatches = matchCustomKeywords(article, customKeywords);
   }
+}
+
+function needsArticleEnrichmentRepair(article: ArticleInput): boolean {
+  if (!article.displayTitle || !article.summary || !article.aiAnalysis) return true;
+  if (looksLikeGarbledAiText(article.summary) || looksLikeGarbledAiText(article.aiAnalysis)) return true;
+  return isLowInformationHotSearch(
+    {
+      sourceId: article.sourceId,
+      url: article.url,
+      title: article.title,
+      excerpt: article.excerpt,
+      source: article.source,
+    },
+    {
+      displayTitle: article.displayTitle,
+      summary: article.summary,
+      aiAnalysis: article.aiAnalysis,
+      tags: article.tags ?? [],
+      importance: article.importance ?? 5,
+      coverageCountries: article.coverageCountries ?? [],
+      interestMatches: article.interestMatches ?? [],
+    },
+  );
 }
 
 function writeSourceHealth(
@@ -755,6 +785,7 @@ async function main() {
   const cachedRun = loadRecentRun(date);
   const completeCachedReport = cachedRun
     && cachedRun.runStats?.freshArticles !== undefined
+    && cachedRun.runStats?.enrichmentVersion === AI_ENRICHMENT_VERSION
     && customKeywords.length === 0
     && fs.existsSync(path.join(dateDir, `${date}.json`))
     && fs.existsSync(path.join(dateDir, `${date}.html`));
@@ -886,17 +917,11 @@ async function main() {
   // the budget on fetch-order items while visible cards remain untranslated.
   const visibleRaw = groupRaw(articles, sources, { customKeywords });
   const visibleByCategory = new Map<string, ArticleInput[]>();
+  const suppressedSummaryIssues: string[] = [];
+  const suppressedUrls = new Set<string>();
+  const initiallyVisibleArticles = visibleArticlesFromRaw(visibleRaw);
   for (const category of Object.keys(visibleRaw) as Array<keyof typeof visibleRaw>) {
-    const seen = new Set<string>();
-    const visible = visibleRaw[category]
-      .flatMap((subgroup) => subgroup.sources)
-      .flatMap((source) => source.items)
-      .filter((article) => {
-        if (seen.has(article.url)) return false;
-        seen.add(article.url);
-        return true;
-      });
-    visibleByCategory.set(category, visible);
+    visibleByCategory.set(category, initiallyVisibleArticles.filter((article) => article.category === category));
   }
 
   const runStats: RunStats = {
@@ -908,29 +933,41 @@ async function main() {
     ...freshness.stats,
     generatedAt: new Date().toISOString(),
     mode: cachedRun ? "reuse" : "fresh",
+    enrichmentVersion: AI_ENRICHMENT_VERSION,
   };
   const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
     const items = visibleByCategory.get(cfg.key) ?? [];
     if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
     const targets = cachedRun
       ? items.filter((article) =>
-          !article.displayTitle
-          || !article.summary
+          needsArticleEnrichmentRepair(article)
           || (customKeywords.length > 0 && (article.interestMatches?.length ?? 0) > 0),
         )
       : items;
     if (targets.length === 0) {
-      const enriched = items.filter((article) => article.displayTitle && article.summary).length;
-      console.log(`[daily]  ${cfg.key.padEnd(12)} cache complete ${enriched}/${items.length}`);
-      return { key: cfg.key, requested: items.length, enriched };
+      for (const article of items) {
+        if (isHotSearchArticle(article.sourceId)) {
+          article.summary = preserveTrendQuery(article.sourceId, article.title, article.summary);
+        }
+      }
+      const malformed = items.filter(needsArticleEnrichmentRepair);
+      if (malformed.length > 0) {
+        malformed.forEach((article) => suppressedUrls.add(article.url));
+        suppressedSummaryIssues.push(`${cfg.label}屏蔽 ${malformed.length} 条摘要缺失、低信息或疑似乱码内容，已跳过并继续发布其它信息。`);
+        visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
+      }
+      const publishable = items.filter((article) => !suppressedUrls.has(article.url));
+      console.log(`[daily]  ${cfg.key.padEnd(12)} cache complete ${publishable.length}/${items.length}`);
+      return { key: cfg.key, requested: publishable.length, enriched: publishable.length };
     }
     const t1 = Date.now();
     const results = await consolidatedEnrich(
       cfg.label,
       targets.map((a) => ({
+        sourceId: a.sourceId,
         url: a.url,
         title: a.title,
-        excerpt: a.summary ?? a.excerpt,
+        excerpt: a.excerpt ?? a.summary,
         source: a.source,
         sourceCountry: a.sourceCountry,
         customKeywords,
@@ -943,6 +980,7 @@ async function main() {
       if (r?.displayTitle) {
         a.displayTitle = r.displayTitle;
         a.summary = r.summary;
+        a.aiAnalysis = r.aiAnalysis;
         a.tags = r.tags;
         a.importance = r.importance;
         const explicitCountries = detectCoverageCountries(`${a.title} ${a.excerpt ?? ""} ${a.summary ?? ""}`);
@@ -952,9 +990,25 @@ async function main() {
         matched++;
       }
     }
-    const enriched = items.filter((article) => article.displayTitle && article.summary).length;
-    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${items.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
-    return { key: cfg.key, requested: items.length, enriched };
+    for (const article of items) {
+      if (isHotSearchArticle(article.sourceId)) {
+        article.summary = preserveTrendQuery(article.sourceId, article.title, article.summary);
+      }
+    }
+    const malformed = items.filter(needsArticleEnrichmentRepair);
+    if (malformed.length > 0) {
+      for (const article of malformed) {
+        suppressedUrls.add(article.url);
+      }
+      suppressedSummaryIssues.push(
+        `${cfg.label}屏蔽 ${malformed.length} 条摘要缺失、低信息或疑似乱码内容，已跳过并继续发布其它信息。`,
+      );
+      visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
+    }
+    const publishable = items.filter((article) => !suppressedUrls.has(article.url));
+    const enriched = publishable.filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
+    console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${publishable.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
+    return { key: cfg.key, requested: publishable.length, enriched };
   }));
   const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 1);
   for (const category of enrichmentHealth) {
@@ -965,6 +1019,17 @@ async function main() {
       throw new Error(`${category.key} enrichment coverage ${(coverage * 100).toFixed(1)}% is below MIN_ENRICHMENT_COVERAGE ${(minEnrichmentCoverage * 100).toFixed(1)}%`);
     }
   }
+  if (suppressedUrls.size > 0) {
+    const retained = articles.filter((article) => !suppressedUrls.has(article.url));
+    articles.length = 0;
+    articles.push(...retained);
+  }
+  runStats.suppressedArticles = suppressedUrls.size;
+  let raw = filterRawArticles(visibleRaw, (article) => !suppressedUrls.has(article.url));
+  const displayedArticles = visibleArticlesFromRaw(raw);
+  runStats.displayedArticles = displayedArticles.length;
+  runStats.aiEnrichedArticles = displayedArticles
+    .filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
   console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
   // Phase 5: Trading signals (optional, non-fatal)
@@ -977,15 +1042,13 @@ async function main() {
     console.warn(`[daily] trading section failed: ${e instanceof Error ? e.message : e}`);
   }
 
-  // Phase 6: Generate digest (hero headlines + briefs + keywords)
-  console.log(`[daily] generating digest with ${getModelTag()}…`);
-  const digestT0 = Date.now();
-  let { report } = await generateDailyReport(articles);
+  // Phase 6: Build metadata from the exact web-visible, already-enriched set.
+  // This avoids a duplicate LLM digest call over content the card pass already processed.
+  console.log(`[daily] composing digest metadata from ${displayedArticles.length} visible articles…`);
+  let report = buildDailyReportFromEnriched(displayedArticles);
   if (trading) report.trading = trading;
-  console.log(`[daily] digest ready in ${((Date.now() - digestT0) / 1000).toFixed(1)}s`);
 
   const base = path.join(dateDir, date);
-  let raw = groupRaw(articles, sources, { customKeywords });
 
   // Phase 7: Deterministic category summaries from already-enriched visible
   // items. This avoids five additional LLM calls and keeps the overview tied
@@ -1001,7 +1064,7 @@ async function main() {
       ["cn-community", "overseas-community", "blog-weekly"].includes(sourceSubcat.get(a.sourceId) ?? "") },
   ];
   for (const cfg of SUMMARY_CONFIG) {
-    const items = articles
+    const items = displayedArticles
       .filter((a) => cfg.filter(a) && !!a.summary)
       .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))
       .slice(0, 3);
@@ -1019,10 +1082,15 @@ async function main() {
   const reviewT0 = Date.now();
   const reviewInput = CATEGORY_CONFIG.map((cfg) => {
     const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
-    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}`);
+    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}；AI评价：${a.aiAnalysis ?? "未生成"}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);
+  if (suppressedSummaryIssues.length > 0) {
+    review.issues.push(...suppressedSummaryIssues);
+    review.suggestions.push("乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。");
+    review.summary = `${review.summary} ${suppressedSummaryIssues.join(" ")}`.trim();
+  }
   console.log(`[daily] AI review done in ${((Date.now() - reviewT0) / 1000).toFixed(1)}s — ${review.passed ? "✅ PASSED" : "⚠️ ISSUES FOUND"}`);
   if (review.issues.length > 0) {
     for (const issue of review.issues) console.warn(`  [review] ${issue}`);
@@ -1056,7 +1124,19 @@ async function main() {
   fs.writeFileSync(`${base}.json`, JSON.stringify(report, null, 2), "utf8");
   fs.writeFileSync(
     `${base}-articles.json`,
-    JSON.stringify({ date, articles, failedSources, runStats, filterProfile }, null, 2),
+    JSON.stringify({
+      date,
+      articles,
+      failedSources,
+      runStats,
+      filterProfile,
+      qualityReview: {
+        passed: review.passed,
+        summary: review.summary,
+        issues: review.issues,
+        suggestions: review.suggestions,
+      },
+    }, null, 2),
     "utf8",
   );
   fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review, runStats, filterProfile), "utf8");

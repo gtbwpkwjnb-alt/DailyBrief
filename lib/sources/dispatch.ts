@@ -2,6 +2,7 @@ import { fetchAttentionVc } from "./attentionvc";
 import { fetchBilibiliRanking } from "./bilibili-ranking";
 import { fetchBaiduHot } from "./baidu-hot";
 import { fetchGithubTrending } from "./github-trending";
+import { fetchGoogleTrends } from "./google-trends";
 import { fetchHackerNews } from "./hackernews";
 import { fetchHuggingfacePapers } from "./huggingface-papers";
 import { fetchKr36Hot } from "./kr-36-hot";
@@ -20,6 +21,7 @@ export async function fetchSource(source: SourceDef): Promise<RawArticle[]> {
   if (source.type === "reader") return fetchReader(source);
   if (source.id === "hackernews") return fetchHackerNews(source.id);
   if (source.id === "github-trending") return fetchGithubTrending(source.id);
+  if (source.id.startsWith("google-trends-")) return fetchGoogleTrends(source.id, source.url);
   if (source.id === "v2ex-hot") return fetchV2ex(source.id);
   if (source.id === "linuxdo") return fetchLinuxDo(source.id);
   if (source.id === "attentionvc-ai") return fetchAttentionVc(source.id);

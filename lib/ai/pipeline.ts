@@ -61,6 +61,9 @@ export function createReviewUnavailableFallbackArticles(articles: ArticleInput[]
     summary: REPORT_LOCALE === "en"
       ? `Information limited: source excerpt only. ${(article.excerpt ?? article.title).slice(0, 260)}`
       : `信息有限：仅展示来源原文摘录。${(article.excerpt ?? article.title).slice(0, 260)}`,
+    aiAnalysis: REPORT_LOCALE === "en"
+      ? "AI analysis is unavailable for this item; verify the linked source before drawing conclusions or acting on it."
+      : "本条 AI 分析暂不可用，形成判断或采取行动前请先核验标题所链接的原始来源。",
     importance: 1,
     tags: [REPORT_LOCALE === "en" ? "Information limited" : "信息有限"],
     coverageCountries: [],
@@ -152,6 +155,53 @@ export function selectRoundRobin(
     }
   }
   return out;
+}
+
+export function buildDailyReportFromEnriched(articles: ArticleInput[]): DailyReport {
+  const grouped: Record<Category, ArticleInput[]> = { trending: [], tech: [], finance: [], politics: [] };
+  for (const article of articles) grouped[article.category].push(article);
+
+  const ranked = (items: ArticleInput[]) => [...items].sort((a, b) => {
+    const interestDelta = (b.interestMatches?.length ?? 0) - (a.interestMatches?.length ?? 0);
+    if (interestDelta !== 0) return interestDelta;
+    const importanceDelta = (b.importance ?? 5) - (a.importance ?? 5);
+    if (importanceDelta !== 0) return importanceDelta;
+    return (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0);
+  });
+  const toBriefs = (items: ArticleInput[], limit: number): BriefItem[] => ranked(items)
+    .slice(0, limit)
+    .map((article) => ({
+      title: article.displayTitle ?? article.title,
+      url: article.url,
+      source: article.source,
+      summary: article.summary ?? article.excerpt ?? article.title,
+      importance: article.importance ?? 5,
+    }));
+
+  const allRanked = ranked(articles);
+  const lead = allRanked[0];
+  const overviewParts = (Object.keys(grouped) as Category[])
+    .map((category) => ranked(grouped[category])[0]?.summary)
+    .filter((summary): summary is string => Boolean(summary));
+  const tagCounts = new Map<string, number>();
+  for (const article of articles) {
+    for (const tag of article.tags ?? []) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+  }
+
+  return {
+    hero_headline: lead?.displayTitle ?? lead?.title ?? (REPORT_LOCALE === "en" ? "Daily Brief" : "每日简报"),
+    daily_overview: overviewParts.join(REPORT_LOCALE === "en" ? " " : "；").slice(0, REPORT_LOCALE === "en" ? 900 : 220),
+    tech_briefs: toBriefs(grouped.tech, 5),
+    finance_briefs: toBriefs(grouped.finance, 5),
+    politics_briefs: toBriefs(grouped.politics, 3),
+    editor_note: REPORT_LOCALE === "en"
+      ? "Compiled deterministically from the same AI-enriched articles displayed in the web edition."
+      : "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+    keywords: [...tagCounts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 8)
+      .map(([tag]) => tag),
+  };
 }
 
 async function callOnce(userPayloadJson: string): Promise<DailyReport> {
