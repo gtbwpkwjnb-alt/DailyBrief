@@ -2471,8 +2471,9 @@ export function renderHtml(
 	    font-size: 0.8rem;
 	  }
 	  .sub-tab.active {
-	    background: var(--bg-elevated);
-	    color: var(--fg);
+	    background: var(--section-accent);
+	    color: #fff;
+	    border-color: var(--section-accent);
 	    box-shadow: var(--shadow-sm);
 	  }
 
@@ -2496,8 +2497,8 @@ export function renderHtml(
 	  }
 	  .source-tab.active {
 	    background: transparent;
-	    color: var(--link);
-	    border-color: var(--link);
+	    color: var(--section-accent);
+	    border-color: var(--section-accent);
 	    box-shadow: none;
 	  }
 
@@ -2588,7 +2589,39 @@ export function renderHtml(
 	    top: 0.75rem;
 	    z-index: 25;
 	  }
-	  .mobile-context-navigation { display: none; }
+	  .mobile-context-navigation {
+	    display: grid;
+	    gap: 0.35rem;
+	    margin-top: 0.55rem;
+	    padding: 0.4rem;
+	    background: color-mix(in srgb, var(--section-accent) 7%, var(--bg-elevated));
+	    border: 1px solid color-mix(in srgb, var(--section-accent) 32%, var(--rule));
+	    border-radius: var(--radius);
+	    box-shadow: var(--shadow-sm);
+	  }
+	  .mobile-context-navigation nav {
+	    display: flex;
+	    flex-wrap: wrap;
+	    gap: 0.25rem;
+	  }
+	  .mobile-context-navigation nav[hidden] { display: none; }
+	  .mobile-context-navigation .sub-tab,
+	  .mobile-context-navigation .source-tab {
+	    flex: 1 1 5.5rem;
+	    min-width: 0;
+	    padding: 0.38rem 0.48rem;
+	    overflow-wrap: anywhere;
+	    text-align: left;
+	  }
+	  .mobile-context-navigation .source-tab {
+	    border: 1px solid color-mix(in srgb, var(--section-accent) 35%, var(--rule));
+	    border-radius: 0.3rem;
+	  }
+	  .mobile-context-navigation .source-tab.active {
+	    background: color-mix(in srgb, var(--section-accent) 14%, var(--bg-elevated));
+	    color: var(--section-accent);
+	    border-color: var(--section-accent);
+	  }
 	  .stream-navigation .tabs {
 	    position: static;
 	    display: grid;
@@ -2662,14 +2695,14 @@ export function renderHtml(
 	  .panel.stream-section {
 	    display: block;
 	    scroll-margin-top: 0.8rem;
-	    margin: 0 0 1.4rem;
+	    margin: 0 0 1.75rem;
 	    padding: 0.9rem 1rem 0.35rem;
 	    --section-accent: var(--section-color);
-	    background: color-mix(in srgb, var(--section-color) 4%, var(--bg-elevated));
+	    background: color-mix(in srgb, var(--section-color) 7%, var(--bg-elevated));
 	    border: 1px solid color-mix(in srgb, var(--section-color) 34%, var(--rule));
 	    border-radius: var(--radius);
 	    box-shadow: var(--shadow-sm);
-	    border-top: 3px solid var(--section-color, var(--section-accent));
+	    border-top: 4px solid var(--section-color, var(--section-accent));
 	  }
 	  .stream-section[data-panel="trending"] { --section-color: var(--cat-trending); }
 	  .stream-section[data-panel="tech"] { --section-color: var(--cat-tech); }
@@ -2702,7 +2735,7 @@ export function renderHtml(
 	    scroll-margin-top: 0.8rem;
 	    padding-top: 0.45rem;
 	  }
-	  .sub-content + .sub-content { margin-top: 1.2rem; border-top: 1px solid var(--rule); }
+	  .sub-content + .sub-content { margin-top: 1.35rem; border-top: 2px solid color-mix(in srgb, var(--section-color) 32%, var(--rule)); }
 	  .stream-sub-heading { margin-bottom: 0.3rem; border-bottom: 1px solid color-mix(in srgb, var(--section-color) 32%, var(--rule)); }
 	  .stream-sub-heading h2 { margin: 0; font-size: 0.9rem; color: var(--fg-soft); }
 	  .source-content {
@@ -2738,7 +2771,7 @@ export function renderHtml(
 	    padding: 0.78rem 0.75rem;
 	    background: color-mix(in srgb, var(--section-color) 3%, var(--bg-elevated));
 	    border: 1px solid color-mix(in srgb, var(--section-color) 24%, var(--rule));
-	    border-left: 3px solid color-mix(in srgb, var(--section-color) 72%, var(--rule));
+	    border-left: 3px solid var(--section-color);
 	    border-radius: 0.38rem;
 	  }
 	  .stream-section .article:hover {
@@ -2746,6 +2779,18 @@ export function renderHtml(
 	    padding: 0.78rem 0.75rem;
 	    background: color-mix(in srgb, var(--section-color) 7%, var(--bg-elevated));
 	  }
+	  .stream-section .article-summary {
+	    background: color-mix(in srgb, var(--section-color) 9%, var(--bg-elevated));
+	    border-left-color: var(--section-color);
+	  }
+	  .stream-section .article-analysis { border-top-color: color-mix(in srgb, var(--section-color) 34%, var(--rule)); }
+	  .stream-section .article-analysis span { color: var(--section-color); }
+	  .stream-section .category-summary {
+	    background: color-mix(in srgb, var(--section-color) 8%, var(--bg-elevated));
+	    border-color: color-mix(in srgb, var(--section-color) 30%, var(--rule));
+	    border-left-color: var(--section-color);
+	  }
+	  .stream-section .category-summary-eyebrow { color: var(--section-color); }
 	  .sub-tabs,
 	  .source-tabs { scroll-margin-top: 0.8rem; }
 	  .article.stream-pending { display: none; }
@@ -2861,7 +2906,7 @@ export function renderHtml(
 	    }
 	    .stream-navigation .tabs::-webkit-scrollbar { display: none; }
 	    .stream-navigation .tab { flex: 0 0 auto; width: auto; min-height: 2rem; padding: 0.38rem 0.55rem; }
-	    .mobile-context-navigation { display: grid; gap: 0.2rem; margin-top: 0.28rem; }
+	    .mobile-context-navigation { display: grid; gap: 0.2rem; margin-top: 0.28rem; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
 	    .mobile-context-navigation nav {
 	      display: flex;
 	      flex-wrap: nowrap;
@@ -2873,7 +2918,8 @@ export function renderHtml(
 	    .mobile-context-navigation nav::-webkit-scrollbar { display: none; }
 	    .mobile-context-navigation nav[hidden] { display: none; }
 	    .mobile-context-navigation .sub-tab,
-	    .mobile-context-navigation .source-tab { flex: 0 0 auto; min-height: 1.8rem; padding: 0.25rem 0.55rem; }
+	    .mobile-context-navigation .source-tab { flex: 0 0 auto; min-height: 1.8rem; padding: 0.25rem 0.55rem; text-align: center; }
+	    .mobile-context-navigation .sub-tab.active { background: var(--section-accent); color: #fff; border-color: var(--section-accent); }
 	    .mobile-context-navigation .source-tab { border: 1px solid color-mix(in srgb, var(--section-accent) 35%, var(--rule)); border-radius: 0.3rem; }
 	    .mobile-context-navigation .source-tab.active { background: color-mix(in srgb, var(--section-accent) 15%, var(--bg-elevated)); color: var(--section-accent); border-color: var(--section-accent); }
 	    .reading-context { margin: 0.28rem 0 0; padding: 0.38rem 0.55rem; }
@@ -2884,7 +2930,7 @@ export function renderHtml(
 	    .update-available { margin-top: 0.28rem; padding: 0.4rem 0.55rem; }
 	    .stream-feed .sub-tabs,
 	    .stream-feed .source-tabs { display: none; }
-	    .panel.stream-section { scroll-margin-top: var(--mobile-stream-nav-height, 9rem); margin-bottom: 0.75rem; padding: 0.7rem 0.72rem 0.2rem; }
+	    .panel.stream-section { scroll-margin-top: var(--mobile-stream-nav-height, 9rem); margin-bottom: 1.1rem; padding: 0.7rem 0.72rem 0.2rem; }
 	    .sub-content,
 	    .source-content { scroll-margin-top: var(--mobile-stream-nav-height, 9rem); }
 	    .stream-source-heading { top: var(--mobile-stream-nav-height, 9rem); }

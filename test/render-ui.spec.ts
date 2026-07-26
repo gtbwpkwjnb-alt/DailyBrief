@@ -455,6 +455,44 @@ test("mobile navigation keeps the current subsection and source directly reachab
   await expect(page.locator("body")).toHaveAttribute("data-active-category", "community");
   await expect(page.locator(".article[data-article-url='https://example.com/huxiu']")).toBeVisible();
   await expect(page.locator(".article-meta, .article-legacy-score, .article-priority")).toHaveCount(0);
+
+  const sectionColor = await page.locator(".stream-section[data-panel='community']").evaluate(
+    (element: unknown) => (globalThis as any).getComputedStyle(element).borderTopColor,
+  );
+  await expect.poll(() => page.locator("#mobileSubTabs .sub-tab.active").evaluate(
+    (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
+  )).toBe(sectionColor);
+  await expect.poll(() => page.locator("#mobileSourceTabs .source-tab.active").evaluate(
+    (element: unknown) => (globalThis as any).getComputedStyle(element).borderColor,
+  )).toBe(sectionColor);
+});
+
+test("desktop sidebar keeps current subsection shortcuts visible and category-colored", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 800 });
+  const articles: ArticleInput[] = [
+    { sourceId: "github-trending", source: "GitHub Trending", title: "GitHub", url: "https://example.com/desktop/github", category: "tech", summary: "GitHub 摘要" },
+    { sourceId: "qbitai", source: "量子位", title: "AI", url: "https://example.com/desktop/ai", category: "tech", summary: "AI 摘要" },
+  ];
+  await page.setContent(renderHtml(report, groupRaw(articles, sources), "2026-07-10", []));
+  await page.locator(".tab[data-tab='tech']").click();
+
+  const shortcuts = page.locator("#mobileSubTabs");
+  await expect(shortcuts).toBeVisible();
+  await expect(shortcuts.locator(".sub-tab[data-sub='github-trending']")).toBeVisible();
+  const aiShortcut = shortcuts.locator(".sub-tab[data-sub='ai-news']");
+  await expect(aiShortcut).toBeVisible();
+  await aiShortcut.click();
+  await expect(aiShortcut).toHaveClass(/active/);
+  await expect(page.locator("#currentSubcategory")).toContainText("AI 媒体");
+
+  const sectionColor = await page.locator(".stream-section[data-panel='tech']").evaluate(
+    (element: unknown) => (globalThis as any).getComputedStyle(element).borderTopColor,
+  );
+  await expect.poll(() => aiShortcut.evaluate(
+    (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
+  )).toBe(sectionColor);
+  await expect(page.locator(".stream-section[data-panel='tech'] .article").first()).toHaveCSS("border-left-color", sectionColor);
+  await expect(page.locator(".stream-section[data-panel='tech'] .article-summary").first()).toHaveCSS("border-left-color", sectionColor);
 });
 
 test("edition polling preserves existing query parameters", async ({ page }) => {
