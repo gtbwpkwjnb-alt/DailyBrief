@@ -20,6 +20,7 @@
 *.tsbuildinfo
 /test-results/
 /playwright-report/
+/.dailybrief/
 
 # screenshot originals (only the cropped versions are committed)
 /docs/screenshots/originals/

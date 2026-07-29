@@ -46,7 +46,7 @@ async function main() {
   console.log(`[render] loaded ${articles.length} articles + report`);
 
   // Dynamic import to bypass ESM module cache during UI iteration
-  const { renderHtml, groupRaw, renderMarkdown } = await import(
+  const { renderHtml, groupRaw, renderMarkdown, selectPersonalizedArticles } = await import(
     `../lib/output/render?cacheBust=${Date.now()}`
   );
 
@@ -58,11 +58,12 @@ async function main() {
     `[render] freshness kept ${freshness.stats.freshArticles}/${articles.length} articles `
       + `(${freshness.stats.freshnessWindowHours}h window)`,
   );
-  const raw = groupRaw(freshness.articles, sources, { customKeywords: filterProfile?.customKeywords });
+  const raw = groupRaw(freshness.articles, sources);
+  const personalized = selectPersonalizedArticles(freshness.articles, raw, filterProfile?.customKeywords ?? []);
   const dateDir = path.join(OUTPUT_DIR, date);
   fs.mkdirSync(dateDir, { recursive: true });
   const base = path.join(dateDir, date);
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, {}, qualityReview, effectiveRunStats, filterProfile), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, {}, qualityReview, effectiveRunStats, filterProfile, undefined, personalized), "utf8");
   if (process.env.OUTPUT_MARKDOWN === "true") {
     fs.writeFileSync(`${base}.md`, renderMarkdown(report, date), "utf8");
     console.log(`[render] wrote ${base}.{html,md}`);

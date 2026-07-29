@@ -26,6 +26,7 @@ import {
   enrichContentTags,
   consolidatedEnrich,
   aiReview,
+  resolveReviewBlockingItems,
   looksLikeGarbledAiText,
   isLowInformationHotSearch,
   type EnrichInput,
@@ -38,6 +39,7 @@ import {
   filterRawArticles,
   renderHtml,
   renderMarkdown,
+  selectPersonalizedArticles,
   visibleArticlesFromRaw,
 } from "../lib/output/render";
 import { parseReportSidecar } from "../lib/output/sidecar";
@@ -51,11 +53,7 @@ import {
   isHotSearchArticle,
   preserveTrendQuery,
 } from "../lib/editorial/context";
-import { analyzeWatchlist } from "../lib/trading/runner";
-import { fetchCryptoFearGreed } from "../lib/trading/fear-greed";
-import { fetchCryptoGlobal } from "../lib/trading/coingecko";
-import { generateTradingCommentary } from "../lib/ai/trading-commentary";
-import type { TradingSection } from "../lib/ai/pipeline";
+import { loadReaderKeywords } from "../lib/editorial/preferences";
 import { todayKey } from "../lib/utils";
 
 const OUTPUT_DIR = "daily_reports";
@@ -96,7 +94,10 @@ const REUSE_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 function requestedCustomKeywords(): string[] {
   const raw = process.env.DAILY_CUSTOM_KEYWORDS_JSON;
-  if (!raw) return normalizeCustomKeywords(process.env.DAILY_CUSTOM_KEYWORDS);
+  if (raw === undefined) {
+    const environmentKeywords = normalizeCustomKeywords(process.env.DAILY_CUSTOM_KEYWORDS);
+    return environmentKeywords.length > 0 ? environmentKeywords : loadReaderKeywords();
+  }
   try {
     return normalizeCustomKeywords(JSON.parse(raw) as string[]);
   } catch {
@@ -737,46 +738,6 @@ async function enrichMergedSubgroup(
   if (summaries.size > 0 && date) writeEnrichCache(cacheScope, date, summaries);
 }
 
-/**
- * Pull daily OHLCV from Yahoo for every ticker in the watchlist, compute
- * indicators + signals, then ask Sonnet for a market overview + a
- * picks-to-watch list. Returns null if no ticker came back.
- */
-async function runTrading(): Promise<TradingSection | null> {
-  console.log(`[daily] analyzing watchlist + crypto context (Yahoo / alt.me / CoinGecko)…`);
-  const t0 = Date.now();
-  const [tickers, cryptoFearGreed, cryptoGlobal] = await Promise.all([
-    analyzeWatchlist(),
-    fetchCryptoFearGreed(),
-    fetchCryptoGlobal(),
-  ]);
-  console.log(
-    `[daily] indicators ready in ${((Date.now() - t0) / 1000).toFixed(1)}s — ${tickers.length} tickers` +
-      (cryptoFearGreed ? `, F&G ${cryptoFearGreed.value}` : ", F&G ✗") +
-      (cryptoGlobal
-        ? `, BTC dom ${cryptoGlobal.btcDominance.toFixed(1)}%`
-        : ", CG ✗"),
-  );
-  if (tickers.length === 0) return null;
-  console.log(`[daily] generating trading commentary with ${getModelTag()}…`);
-  const t1 = Date.now();
-  const commentary = await generateTradingCommentary({
-    tickers,
-    cryptoFearGreed: cryptoFearGreed ?? undefined,
-    cryptoGlobal: cryptoGlobal ?? undefined,
-  });
-  console.log(
-    `[daily] trading commentary ready in ${((Date.now() - t1) / 1000).toFixed(1)}s`,
-  );
-  return {
-    ...commentary,
-    tickers,
-    crypto_fear_greed: cryptoFearGreed ?? undefined,
-    crypto_global: cryptoGlobal ?? undefined,
-    generated_at: new Date().toISOString(),
-  };
-}
-
 async function main() {
   const date = todayKey();
   const dateDir = path.join(OUTPUT_DIR, date);
@@ -913,13 +874,14 @@ async function main() {
     { key: "finance",  label: "财经要点", filter: (a: ArticleInput) => a.category === "finance" },
     { key: "politics", label: "国际时政", filter: (a: ArticleInput) => a.category === "politics" },
   ];
-  // Enrich the exact articles that groupRaw will render. This avoids spending
-  // the budget on fetch-order items while visible cards remain untranslated.
-  const visibleRaw = groupRaw(articles, sources, { customKeywords });
+  // Public selection is stable and never reordered by a user's keywords.
+  // Personalized additions are selected separately from the eligible pool.
+  const visibleRaw = groupRaw(articles, sources);
+  let personalizedArticles = selectPersonalizedArticles(articles, visibleRaw, customKeywords);
   const visibleByCategory = new Map<string, ArticleInput[]>();
   const suppressedSummaryIssues: string[] = [];
   const suppressedUrls = new Set<string>();
-  const initiallyVisibleArticles = visibleArticlesFromRaw(visibleRaw);
+  const initiallyVisibleArticles = [...visibleArticlesFromRaw(visibleRaw), ...personalizedArticles];
   for (const category of Object.keys(visibleRaw) as Array<keyof typeof visibleRaw>) {
     visibleByCategory.set(category, initiallyVisibleArticles.filter((article) => article.category === category));
   }
@@ -1026,66 +988,108 @@ async function main() {
   }
   runStats.suppressedArticles = suppressedUrls.size;
   let raw = filterRawArticles(visibleRaw, (article) => !suppressedUrls.has(article.url));
-  const displayedArticles = visibleArticlesFromRaw(raw);
-  runStats.displayedArticles = displayedArticles.length;
-  runStats.aiEnrichedArticles = displayedArticles
+  personalizedArticles = personalizedArticles.filter((article) => !suppressedUrls.has(article.url));
+  let displayedArticles = visibleArticlesFromRaw(raw);
+  runStats.displayedArticles = displayedArticles.length + personalizedArticles.length;
+  runStats.personalizedArticles = personalizedArticles.length;
+  runStats.aiEnrichedArticles = [...displayedArticles, ...personalizedArticles]
     .filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
   console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
 
-  // Phase 5: Trading signals (optional, non-fatal)
-  let trading: TradingSection | null = null;
-  try {
-    trading = cachedRun && customKeywords.length > 0
-      ? loadCachedReport(date)?.trading ?? null
-      : await runTrading();
-  } catch (e) {
-    console.warn(`[daily] trading section failed: ${e instanceof Error ? e.message : e}`);
-  }
-
-  // Phase 6: Build metadata from the exact web-visible, already-enriched set.
+  // Phase 5: Build metadata from the exact web-visible, already-enriched set.
   // This avoids a duplicate LLM digest call over content the card pass already processed.
   console.log(`[daily] composing digest metadata from ${displayedArticles.length} visible articles…`);
   let report = buildDailyReportFromEnriched(displayedArticles);
-  if (trading) report.trading = trading;
 
   const base = path.join(dateDir, date);
 
-  // Phase 7: Deterministic category summaries from already-enriched visible
+  // Phase 6: Deterministic category summaries from already-enriched visible
   // items. This avoids five additional LLM calls and keeps the overview tied
   // to exactly what the reader can inspect below.
   console.log(`[daily] composing category summaries…`);
   const catSummaries: Record<string, string> = {};
   const catT0 = Date.now();
-  // Build a lookup map for source subcategories
-  const sourceSubcat = new Map(sources.map((s) => [s.id, s.subcategory]));
-  const SUMMARY_CONFIG = [
-    ...CATEGORY_CONFIG,
-    { key: "community", label: "社区讨论", filter: (a: ArticleInput) =>
-      ["cn-community", "overseas-community", "blog-weekly"].includes(sourceSubcat.get(a.sourceId) ?? "") },
-  ];
-  for (const cfg of SUMMARY_CONFIG) {
-    const items = displayedArticles
-      .filter((a) => cfg.filter(a) && !!a.summary)
-      .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))
-      .slice(0, 3);
-    if (items.length === 0) continue;
-    catSummaries[cfg.key] = items
-      .map((article) => `${article.displayTitle ?? article.title}：${article.summary}`)
-      .join("；")
-      .slice(0, 320);
-  }
+  const SUMMARY_CONFIG = CATEGORY_CONFIG;
+  const refreshCategorySummaries = (): void => {
+    for (const key of Object.keys(catSummaries)) delete catSummaries[key];
+    for (const cfg of SUMMARY_CONFIG) {
+      const items = displayedArticles
+        .filter((a) => cfg.filter(a) && !!a.summary)
+        .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))
+        .slice(0, 3);
+      if (items.length === 0) continue;
+      catSummaries[cfg.key] = items
+        .map((article) => `${article.displayTitle ?? article.title}：${article.summary}`)
+        .join("；")
+        .slice(0, 320);
+    }
+  };
+  refreshCategorySummaries();
   const catMatched = SUMMARY_CONFIG.filter((c) => catSummaries[c.key]).length;
   console.log(`[daily] category summaries done in ${((Date.now() - catT0) / 1000).toFixed(1)}s, ${catMatched}/${SUMMARY_CONFIG.length}`);
 
-  // Phase 8: AI Review — final quality check before publishing
+  // Phase 7: AI Review — final quality check before publishing
   console.log(`[daily] running AI quality review…`);
   const reviewT0 = Date.now();
+  const reviewSampleArticles: ArticleInput[] = [];
   const reviewInput = CATEGORY_CONFIG.map((cfg) => {
     const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
-    const lines = items.map((a) => `  - [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}；AI评价：${a.aiAnalysis ?? "未生成"}`);
+    reviewSampleArticles.push(...items);
+    const lines = items.map((a) => `  - [category=${cfg.key}] [url=${a.url}] [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}；AI评价：${a.aiAnalysis ?? "未生成"}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
   const review: ReviewResult = await aiReview(reviewInput);
+  const reviewRecovery = resolveReviewBlockingItems(review, reviewSampleArticles);
+  const recoveryUrls = new Set(reviewRecovery.urls);
+  const affectedReviewCategories = new Set(
+    reviewSampleArticles.filter((article) => recoveryUrls.has(article.url)).map((article) => article.category),
+  );
+  const minReviewCategoryItems = readPositiveInt("MIN_REVIEW_CATEGORY_ITEMS", 1);
+  const recoveryCoverageGaps = [...affectedReviewCategories].filter((category) =>
+    reviewSampleArticles.filter((article) => article.category === category && !recoveryUrls.has(article.url)).length < minReviewCategoryItems,
+  );
+  const canRecoverReview = reviewRecovery.recoverable && recoveryCoverageGaps.length === 0;
+  if (reviewRecovery.recoverable && !canRecoverReview) {
+    review.issues.push(`屏蔽问题条目后将导致栏目覆盖低于最低 ${minReviewCategoryItems} 条：${recoveryCoverageGaps.join("、")}。`);
+    review.failureCodes.push("AI_REVIEW_RECOVERY_COVERAGE");
+  }
+  if (canRecoverReview) {
+    for (const url of reviewRecovery.urls) suppressedUrls.add(url);
+    const retained = articles.filter((article) => !suppressedUrls.has(article.url));
+    articles.length = 0;
+    articles.push(...retained);
+    raw = filterRawArticles(raw, (article) => !suppressedUrls.has(article.url));
+    personalizedArticles = personalizedArticles.filter((article) => !suppressedUrls.has(article.url));
+    for (const [key, categoryArticles] of visibleByCategory) {
+      visibleByCategory.set(key, categoryArticles.filter((article) => !suppressedUrls.has(article.url)));
+    }
+    displayedArticles = visibleArticlesFromRaw(raw);
+    report = buildDailyReportFromEnriched(displayedArticles);
+    refreshCategorySummaries();
+    runStats.suppressedArticles = suppressedUrls.size;
+    runStats.displayedArticles = displayedArticles.length + personalizedArticles.length;
+    runStats.personalizedArticles = personalizedArticles.length;
+    runStats.aiEnrichedArticles = [...displayedArticles, ...personalizedArticles]
+      .filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
+    const recoveryIssue = `质量审核定位并屏蔽 ${reviewRecovery.urls.length} 条存在发布级事实风险的内容，其余信息继续发布。`;
+    review.issues.push(recoveryIssue);
+    review.suggestions.push("被屏蔽条目将在下一次抓取和 AI 精炼时重新评估，不进入本期公开输出。");
+    review.summary = `${review.summary} ${recoveryIssue}`.trim();
+    const reviewedArticleByUrl = new Map(reviewSampleArticles.map((article) => [article.url, article]));
+    const originalFailureCodes = [...review.failureCodes];
+    review.recovery = {
+      suppressedCount: reviewRecovery.urls.length,
+      suppressedItems: review.blockingItems.map((item) => ({
+        ...item,
+        category: reviewedArticleByUrl.get(item.url)?.category ?? item.category,
+      })),
+      originalFailureCodes,
+    };
+    review.passed = true;
+    review.reviewState = "passed";
+    review.publicationState = "eligible";
+    review.failureCodes = [];
+  }
   if (suppressedSummaryIssues.length > 0) {
     review.issues.push(...suppressedSummaryIssues);
     review.suggestions.push("乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。");
@@ -1099,8 +1103,12 @@ async function main() {
   const highRiskReviewContent = reviewedArticles.some(hasHighRiskReviewContent);
   if (review.reviewState === "unavailable" && !highRiskReviewContent) {
     const safeArticles = createReviewUnavailableFallbackArticles(reviewedArticles);
-    report = createReviewUnavailableFallback(safeArticles);
-    raw = groupRaw(safeArticles, sources, { customKeywords: [] });
+    const publicUrls = new Set(visibleArticlesFromRaw(raw).map((article) => article.url));
+    const personalizedUrls = new Set(personalizedArticles.map((article) => article.url));
+    const safePublicArticles = safeArticles.filter((article) => publicUrls.has(article.url));
+    report = createReviewUnavailableFallback(safePublicArticles);
+    raw = groupRaw(safePublicArticles, sources);
+    personalizedArticles = safeArticles.filter((article) => personalizedUrls.has(article.url));
     for (const key of Object.keys(catSummaries)) delete catSummaries[key];
     review.publicationState = "limited";
     review.summary = "审核服务不可用；已发布仅含来源原文标题和摘录的信息有限版本。";
@@ -1113,7 +1121,11 @@ async function main() {
       publicationState: review.publicationState,
       reviewState: review.reviewState,
       failureCodes: review.failureCodes,
+      blockingScope: review.blockingScope,
+      blockingItems: review.blockingItems,
+      recovery: review.recovery,
       issues: review.issues,
+      suggestions: review.suggestions,
     }, null, 2), "utf8");
     appendRunLog(date, `blocked by AI quality review [${review.failureCodes.join(",")}]: ${review.issues.join("; ")}`);
     throw new Error(`AI quality review did not pass: ${review.summary}`);
@@ -1135,17 +1147,23 @@ async function main() {
         summary: review.summary,
         issues: review.issues,
         suggestions: review.suggestions,
+        blockingScope: review.blockingScope,
+        blockingItems: review.blockingItems,
+        recovery: review.recovery,
       },
     }, null, 2),
     "utf8",
   );
-  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review, runStats, filterProfile), "utf8");
+  fs.writeFileSync(`${base}.html`, renderHtml(report, raw, date, failedSources, catSummaries, review, runStats, filterProfile, undefined, personalizedArticles), "utf8");
   fs.writeFileSync(`${base}-quality-review.json`, JSON.stringify({
     date,
     reviewedAt: new Date().toISOString(),
     publicationState: review.publicationState,
     reviewState: review.reviewState,
     failureCodes: review.failureCodes,
+    blockingScope: review.blockingScope,
+    blockingItems: review.blockingItems,
+    recovery: review.recovery,
     issues: review.issues,
     suggestions: review.suggestions,
   }, null, 2), "utf8");

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
-import { aiReview, consolidatedEnrich, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText } from "../lib/ai/enrich";
+import { aiReview, consolidatedEnrich, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText, resolveReviewBlockingItems } from "../lib/ai/enrich";
 import { buildDailyReportFromEnriched, createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
-import { filterRawArticles, groupRaw, safeExternalUrl, visibleArticlesFromRaw } from "../lib/output/render";
+import { filterRawArticles, groupRaw, safeExternalUrl, selectPersonalizedArticles, visibleArticlesFromRaw } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
 import { parseFreshRssItems, parseMinifluxEntries } from "../lib/sources/reader";
 import { parseGoogleTrendsXml } from "../lib/sources/google-trends";
@@ -17,6 +17,29 @@ test("safeExternalUrl only permits HTTP(S) links", () => {
   assert.equal(safeExternalUrl("http://example.com"), "http://example.com/");
   assert.equal(safeExternalUrl("javascript:alert(1)"), null);
   assert.equal(safeExternalUrl("data:text/html,test"), null);
+});
+
+test("personalized selection adds eligible keyword matches without changing public selection", () => {
+  const registry = sources.filter((source) => source.id === "github-trending");
+  const candidates = Array.from({ length: 16 }, (_, index) => ({
+    sourceId: "github-trending",
+    source: "GitHub Trending",
+    title: index === 15 ? "Special robotics project" : `General project ${index}`,
+    url: `https://example.com/project-${index}`,
+    category: "tech" as const,
+    publishedAt: new Date(Date.UTC(2026, 6, 28, 0, 16 - index)),
+  }));
+  const publicWithoutKeywords = groupRaw(candidates, registry);
+  const publicWithKeywords = groupRaw(candidates, registry, { customKeywords: ["robotics"] });
+  assert.deepEqual(
+    visibleArticlesFromRaw(publicWithKeywords).map((article) => article.url),
+    visibleArticlesFromRaw(publicWithoutKeywords).map((article) => article.url),
+  );
+  const personalized = selectPersonalizedArticles(candidates, publicWithoutKeywords, ["robotics"]);
+  assert.equal(personalized.length, 1);
+  assert.equal(personalized[0]?.title, "Special robotics project");
+  assert.deepEqual(personalized[0]?.interestMatches, ["robotics"]);
+  assert.equal(visibleArticlesFromRaw(publicWithoutKeywords).some((article) => article.url === personalized[0]?.url), false);
 });
 
 test("garbled AI summaries are detected without rejecting normal bilingual terms", () => {
@@ -419,6 +442,66 @@ test("reviewer outage is never reported as a passed review", async () => {
   assert.equal(result.reviewState, "unavailable");
   assert.equal(result.publicationState, "blocked");
   assert.deepEqual(result.failureCodes, ["AI_REVIEW_UNAVAILABLE"]);
+});
+
+test("structured item-level review blockers can be resolved to exact reviewed URLs", async () => {
+  const result = await aiReview("test", async () => ({
+    text: JSON.stringify({
+      passed: false,
+      summary: "One unsupported claim must be removed.",
+      issues: ["The named person is unsupported by the source excerpt."],
+      suggestions: [],
+      blockingScope: "items",
+      blockingItems: [{
+        url: "https://example.com/unsafe",
+        category: "finance",
+        reason: "The named person is unsupported by the source excerpt.",
+      }],
+    }),
+  }) as never);
+
+  assert.equal(result.reviewState, "failed");
+  assert.equal(result.blockingScope, "items");
+  const resolution = resolveReviewBlockingItems(result, [
+    { url: "https://example.com/safe", category: "finance" },
+    { url: "https://example.com/unsafe", category: "finance" },
+  ]);
+  assert.equal(resolution.recoverable, true);
+  assert.deepEqual(resolution.urls, ["https://example.com/unsafe"]);
+  assert.deepEqual(resolution.unresolved, []);
+
+  const localizedCategory = resolveReviewBlockingItems({
+    ...result,
+    blockingItems: [{
+      url: "https://example.com/unsafe",
+      category: "财经要点",
+      reason: "The named person is unsupported by the source excerpt.",
+    }],
+  }, [{ url: "https://example.com/unsafe", category: "finance" }]);
+  assert.equal(localizedCategory.recoverable, true);
+});
+
+test("unstructured, systemic, and unknown review blockers remain publication-fatal", async () => {
+  const unstructured = await aiReview("test", async () => ({
+    text: JSON.stringify({
+      passed: false,
+      summary: "A blocker was found but could not be located.",
+      issues: ["Unsupported claim"],
+      suggestions: [],
+    }),
+  }) as never);
+  assert.equal(unstructured.blockingScope, "systemic");
+  assert.equal(resolveReviewBlockingItems(unstructured, [{ url: "https://example.com/item" }]).recoverable, false);
+
+  const unknownItem = {
+    ...unstructured,
+    blockingScope: "items" as const,
+    blockingItems: [{ url: "https://example.com/not-reviewed", reason: "Unsupported claim" }],
+  };
+  const resolution = resolveReviewBlockingItems(unknownItem, [{ url: "https://example.com/item" }]);
+  assert.equal(resolution.recoverable, false);
+  assert.equal(resolution.reason, "unresolved_items");
+  assert.equal(resolution.unresolved.length, 1);
 });
 
 test("reviewer outage fallback is source-only and excludes high-risk content", () => {

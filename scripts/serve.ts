@@ -22,12 +22,12 @@ import { fileURLToPath } from "node:url";
 import { loadAllSources } from "../lib/sources/registry";
 import { fetchSource } from "../lib/sources/dispatch";
 import { filterFreshArticles } from "../lib/sources/freshness";
-import { renderHtml } from "../lib/output/render";
-import { groupRaw } from "../lib/output/render";
+import { groupRaw, renderHtml, selectPersonalizedArticles } from "../lib/output/render";
 import type { FilterProfile, RunStats } from "../lib/output/render";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import type { DailyReport, ArticleInput } from "../lib/ai/pipeline";
 import { normalizeCustomKeywords } from "../lib/editorial/context";
+import { loadReaderKeywords, saveReaderKeywords } from "../lib/editorial/preferences";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -198,6 +198,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/preferences" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ keywords: loadReaderKeywords() }));
+    return;
+  }
+
+  if (url.pathname === "/api/preferences" && req.method === "POST") {
+    if (!isTrustedMutation(req)) {
+      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "Forbidden origin" }));
+      return;
+    }
+    try {
+      const body = await readJsonBody(req) as { keywords?: unknown };
+      const keywords = normalizeCustomKeywords(Array.isArray(body.keywords)
+        ? body.keywords.map(String)
+        : typeof body.keywords === "string" ? body.keywords : undefined);
+      const saved = saveReaderKeywords(keywords);
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ keywords: saved.keywords, lockedAt: saved.lockedAt, appliesTo: "next_run" }));
+    } catch (error) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : "invalid request" }));
+    }
+    return;
+  }
+
   if (url.pathname === "/api/run" && req.method === "POST") {
     if (!isTrustedMutation(req)) {
       res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
@@ -254,12 +281,13 @@ const server = http.createServer(async (req, res) => {
           latest.articles = freshness.articles;
           if (latest.runStats) latest.runStats = { ...latest.runStats, ...freshness.stats };
           // Re-render HTML with updated data
-          const raw = groupRaw(latest.articles, allSources, { customKeywords: latest.filterProfile?.customKeywords });
+          const raw = groupRaw(latest.articles, allSources);
+          const personalized = selectPersonalizedArticles(latest.articles, raw, latest.filterProfile?.customKeywords ?? []);
           const dateDir = latest.date;
           const base = path.join(REPORTS_DIR, dateDir, dateDir);
           // Remove failed source from list if it succeeded
           latest.failedSources = (latest.failedSources ?? []).filter((f) => f.id !== sourceId);
-          const html = renderHtml(latest.report, raw, latest.date, latest.failedSources, undefined, latest.qualityReview, latest.runStats, latest.filterProfile);
+          const html = renderHtml(latest.report, raw, latest.date, latest.failedSources, undefined, latest.qualityReview, latest.runStats, latest.filterProfile, undefined, personalized);
           fs.writeFileSync(`${base}.html`, html, "utf8");
           fs.writeFileSync(`${base}-articles.json`, JSON.stringify({ date: latest.date, articles: latest.articles, failedSources: latest.failedSources, runStats: latest.runStats, filterProfile: latest.filterProfile, qualityReview: latest.qualityReview }, null, 2), "utf8");
           console.log(`[serve] merged ${newItems.length} new items, re-rendered HTML`);
