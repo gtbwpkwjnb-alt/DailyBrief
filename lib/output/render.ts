@@ -46,8 +46,6 @@ const TEXTS_ZH = {
   catTech: "🧑‍💻 技术动态",
   catFinance: "💰 财经要点",
   catPolitics: "🌍 国际时政",
-  catTrading: "📈 市场行情",
-  catCommunity: "💬 社区讨论",
   subAiNews: "AI 媒体",
   subTrendingPapers: "热门论文",
   subXViral: "X 推文",
@@ -126,8 +124,6 @@ const TEXTS_EN: typeof TEXTS_ZH = {
   catTech: "💻 Tech",
   catFinance: "💰 Finance",
   catPolitics: "🌍 World",
-  catTrading: "📈 Markets",
-  catCommunity: "💬 Community",
   subAiNews: "AI Media",
   subTrendingPapers: "Trending Papers",
   subXViral: "X Viral",
@@ -268,6 +264,7 @@ export type RunStats = {
   fetchedArticles: number;
   dedupedArticles: number;
   displayedArticles?: number;
+  personalizedArticles?: number;
   aiEnrichedArticles?: number;
   enrichmentVersion?: number;
   suppressedArticles?: number;
@@ -314,20 +311,14 @@ const CATEGORY_DIGEST_LABELS: Record<Category, string> = {
  * L2 ordering per category. Categories not listed render flat (no L2 tabs).
  */
 const SUBCATEGORY_ORDER: Partial<Record<Category, string[]>> = {
-  // cn-community + overseas-community are listed last so the L1 "community"
-  // panel (rendered separately via TECH_COMMUNITY_SUBS) can extract them.
-  // Within the "tech" L1 panel itself, COMMUNITY_SUBS is filtered out.
-  // Locale filtering at registry level decides which actually appears:
-  // zh mode keeps cn-community (V2EX / LinuxDo); en mode keeps
-  // overseas-community (Hacker News / r/stocks).
 	  trending: ["google-trends", "cn-trending", "reddit-trending"],
-  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "overseas-news", "overseas", "blog-weekly", "cn-community", "overseas-community"],
+  tech: ["github-trending", "trending-papers", "x-viral", "ai-news", "overseas-news", "overseas", "blog-weekly"],
   finance: ["news"],
   politics: ["uk", "us", "france", "japan", "india", "east-asia", "other"],
 };
 
 const TECH_MAIN_SUBS = new Set(["github-trending", "trending-papers", "x-viral", "ai-news", "overseas-news", "overseas", "blog-weekly"]);
-const TECH_COMMUNITY_SUBS = new Set(["cn-community", "overseas-community"]);
+const PUBLIC_EXCLUDED_SUBCATEGORIES = new Set(["cn-community", "overseas-community"]);
 
 const SUBCATEGORY_LABELS: Record<string, string> = {
 	  "google-trends": "Google 热搜",
@@ -446,9 +437,8 @@ function mergedLimitFor(
 export function groupRaw(
   articles: ArticleInput[],
   registry: SourceDef[],
-  options: { customKeywords?: string[] } = {},
+  _options: { customKeywords?: string[] } = {},
 ): RawByCategory {
-  const customKeywords = normalizeCustomKeywords(options.customKeywords);
   const subcatOf = new Map<string, string | undefined>();
   for (const s of registry) subcatOf.set(s.id, s.subcategory);
   // Drop articles from sources that have since been disabled — important
@@ -472,6 +462,7 @@ export function groupRaw(
   // whether the other forum even exists.
   for (const s of registry) {
     if (s.enabled === false) continue;
+    if (PUBLIC_EXCLUDED_SUBCATEGORIES.has(s.subcategory ?? "")) continue;
     if (!buckets[s.category].has(s.id)) {
       buckets[s.category].set(s.id, { sourceName: s.name, items: [] });
     }
@@ -479,6 +470,7 @@ export function groupRaw(
 
   for (const a of articles) {
     if (!enabledIds.has(a.sourceId)) continue;
+    if (PUBLIC_EXCLUDED_SUBCATEGORIES.has(subcatOf.get(a.sourceId) ?? "")) continue;
     if (a.category === "politics" && isSportsArticle(a.title)) continue;
     if (
       (a.sourceId === "v2ex-hot" || a.sourceId === "linuxdo") &&
@@ -496,13 +488,11 @@ export function groupRaw(
 
   for (const cat of Object.keys(buckets) as Category[]) {
     for (const [id, b] of buckets[cat].entries()) {
-      if (PRESERVE_FETCH_ORDER_SOURCES.has(id) && customKeywords.length === 0) continue;
+      if (PRESERVE_FETCH_ORDER_SOURCES.has(id)) continue;
       b.items.sort((a, b) => {
         if (a.stableOrder !== undefined || b.stableOrder !== undefined) {
           return (a.stableOrder ?? Number.MAX_SAFE_INTEGER) - (b.stableOrder ?? Number.MAX_SAFE_INTEGER);
         }
-        const interestDelta = matchCustomKeywords(b, customKeywords).length - matchCustomKeywords(a, customKeywords).length;
-        if (interestDelta !== 0) return interestDelta;
         return (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0);
       });
     }
@@ -599,6 +589,41 @@ export function groupRaw(
   }
 
   return out;
+}
+
+export function selectPersonalizedArticles(
+  eligibleArticles: ArticleInput[],
+  publicRaw: RawByCategory,
+  customKeywords: string[],
+  limit = 24,
+): ArticleInput[] {
+  const keywords = normalizeCustomKeywords(customKeywords);
+  if (keywords.length === 0 || limit <= 0) return [];
+  const publicUrls = new Set(visibleArticlesFromRaw(publicRaw).map((article) => article.url));
+  const enabledIds = new Set(sources.filter((source) => source.enabled !== false).map((source) => source.id));
+  const sourceSubcategories = new Map(sources.map((source) => [source.id, source.subcategory]));
+  return eligibleArticles
+    .filter((article) => enabledIds.has(article.sourceId))
+    .filter((article) => !PUBLIC_EXCLUDED_SUBCATEGORIES.has(sourceSubcategories.get(article.sourceId) ?? ""))
+    .filter((article) => article.category !== "politics" || !isSportsArticle(article.title))
+    .filter((article) => !(
+      (article.sourceId === "v2ex-hot" || article.sourceId === "linuxdo")
+      && V2EX_OFF_TOPIC_RE.test(article.title)
+    ))
+    .filter((article) => !publicUrls.has(article.url))
+    .map((article) => {
+      article.interestMatches = matchCustomKeywords({ title: article.title, excerpt: article.excerpt }, keywords);
+      return article;
+    })
+    .filter((article) => (article.interestMatches?.length ?? 0) > 0)
+    .sort((a, b) => {
+      const matchDelta = (b.interestMatches?.length ?? 0) - (a.interestMatches?.length ?? 0);
+      if (matchDelta !== 0) return matchDelta;
+      const importanceDelta = (b.importance ?? 5) - (a.importance ?? 5);
+      if (importanceDelta !== 0) return importanceDelta;
+      return (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0);
+    })
+    .slice(0, limit);
 }
 
 // ----- HTML helpers -----
@@ -843,6 +868,27 @@ function renderRawCategoryPanel(
   return `<nav class="sub-tabs" aria-label="${REPORT_LOCALE === "en" ? "Section shortcuts" : "子栏目定位"}">${subTabs}</nav>\n<div class="sub-contents">${panels}</div>`;
 }
 
+function renderPersonalizedPanel(items: ArticleInput[]): string {
+  const groups = (Object.keys(CATEGORY_LABELS) as Category[])
+    .map((category) => ({ category, items: items.filter((article) => article.category === category) }))
+    .filter((group) => group.items.length > 0);
+  if (groups.length === 0) return `<p class="empty">${STR.emptyCategory}</p>`;
+  const tabs = groups.map((group, index) =>
+    `<button class="sub-tab${index === 0 ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("personalized", group.category)}" data-sub="${group.category}" data-cat="personalized">${escapeHtml(CATEGORY_LABELS[group.category])}<span class="count">${group.items.length}</span></button>`,
+  ).join("");
+  const panels = groups.map((group) => {
+    const anchor = streamAnchor("personalized", group.category);
+    return `<section class="sub-content active" id="${anchor}" data-sub-content="${group.category}" data-sub-label="${escapeHtml(CATEGORY_LABELS[group.category])}" data-cat="personalized">
+      <section class="source-content active" id="${anchor}-matches" data-source-content="personalized-${group.category}" data-source-label="${REPORT_LOCALE === "en" ? "Keyword matches" : "个性化增量"}" data-sub="${group.category}" data-cat="personalized">
+        <div class="article-list">${group.items.map((article) => renderArticleHtml(article, true)).join("\n")}</div>
+      </section>
+    </section>`;
+  }).join("\n");
+  return `<p class="personalized-scope">${REPORT_LOCALE === "en" ? "Incremental matches selected from the eligible candidate pool; public selections are not repeated." : "从初筛候选池按已锁定词汇增量选入，已进入公共日报的内容不重复显示。"}</p>
+    <nav class="sub-tabs" aria-label="${REPORT_LOCALE === "en" ? "Personalized category shortcuts" : "个性化分类定位"}">${tabs}</nav>
+    <div class="sub-contents">${panels}</div>`;
+}
+
 // ----- tag cloud -----
 
 interface TagEntry {
@@ -982,8 +1028,8 @@ export function renderHtml(
   runStats?: RunStats,
   filterProfile?: FilterProfile,
   publicEditionMeta?: PublicEditionMeta,
+  personalizedArticles: ArticleInput[] = [],
 ): string {
-  const trading = report.trading;
   const effectiveFilterProfile = {
     baseRules: REPORT_LOCALE === "en" ? BASE_FILTER_RULES_EN : BASE_FILTER_RULES_ZH,
     customKeywords: filterProfile?.customKeywords ?? [],
@@ -991,12 +1037,10 @@ export function renderHtml(
   };
   const filterText = filterProfileText(effectiveFilterProfile);
 
-  // Split tech raw subgroups: "tech" L1 panel (github-trending + ai-news)
-  // vs. "community" L1 panel (cn-community). Keeps the registry simple
-  // (V2EX/LinuxDo still live under category=tech) while exposing the
-  // forums as their own top-level tab per UX preference.
+  // Community-discussion subcategories are excluded in groupRaw before
+  // rendering; keep the public technology section limited to product/news
+  // subcategories even when re-rendering an older cached sidecar.
   const techMainSubs = raw.tech.filter((s) => TECH_MAIN_SUBS.has(s.id));
-  const techCommunitySubs = raw.tech.filter((s) => TECH_COMMUNITY_SUBS.has(s.id));
 
   const sumItems = (subs: SubGroup[]) =>
     subs.reduce(
@@ -1004,13 +1048,17 @@ export function renderHtml(
       0,
     );
 	  const counts = {
+	    personalized: personalizedArticles.length,
 	    trending: sumItems(raw.trending),
 	    tech: sumItems(techMainSubs),
 	    finance: sumItems(raw.finance),
 	    politics: sumItems(raw.politics),
-	    community: sumItems(techCommunitySubs),
 	  };
-  const totalStreamItems = counts.trending + counts.tech + counts.politics + counts.finance + counts.community;
+  const totalStreamItems = counts.personalized + counts.trending + counts.tech + counts.politics + counts.finance;
+  const initialCategory = counts.personalized > 0 ? "personalized" : (raw.trending.length > 0 ? "trending" : "tech");
+  const initialCategoryLabel = counts.personalized > 0
+    ? (REPORT_LOCALE === "en" ? "Personalized" : "用户个性化")
+    : (raw.trending.length > 0 ? STR.catTrending : CATEGORY_LABELS.tech);
   const visibleStreamArticles = (Object.keys(raw) as Category[]).flatMap((category) =>
     raw[category].flatMap((sub) => sub.sources.flatMap((source) => source.items)),
   );
@@ -1037,6 +1085,8 @@ export function renderHtml(
   const dedupedArticleCount = runStats?.dedupedArticles ?? fetchedArticleCount;
   const eligibleArticleCount = runStats?.freshArticles ?? totalStreamItems;
   const displayedArticleCount = runStats?.displayedArticles ?? totalStreamItems;
+  const personalizedArticleCount = runStats?.personalizedArticles ?? personalizedArticles.length;
+  const publicDisplayedArticleCount = Math.max(0, displayedArticleCount - personalizedArticleCount);
   const aiEnrichedArticleCount = runStats?.aiEnrichedArticles
     ?? visibleStreamArticles.filter((article) => article.displayTitle && article.summary).length;
   const suppressedArticleCount = runStats?.suppressedArticles ?? 0;
@@ -1050,7 +1100,7 @@ export function renderHtml(
     <dl class="quality-pipeline">
       <div class="quality-stage"><span class="quality-stage-index">1</span><div><dt>${REPORT_LOCALE === "en" ? "Fetched" : "抓取入库"}</dt><dd>${fetchedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? "Sources succeeded" : "来源成功"} ${sourceSuccessDetail}</p></div></div>
       <div class="quality-stage"><span class="quality-stage-index">2</span><div><dt>${REPORT_LOCALE === "en" ? "Eligible pool" : "初筛候选"}</dt><dd>${eligibleArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Deduped ${dedupedArticleCount}; freshness rejected ${freshnessRejectedCount}` : `去重后 ${dedupedArticleCount} 条 · 时效筛除 ${freshnessRejectedCount} 条`}</p></div></div>
-      <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Selected by the public-brief rules; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? `; garbled items suppressed ${suppressedArticleCount}` : ""}` : `按公共日报规则选入 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? ` · 已屏蔽乱码 ${suppressedArticleCount} 条` : ""}`}</p></div></div>
+      <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Public ${publicDisplayedArticleCount} + personalized incremental ${personalizedArticleCount}; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? `; garbled items suppressed ${suppressedArticleCount}` : ""}` : `公共精选 ${publicDisplayedArticleCount} 条 + 个性化增量 ${personalizedArticleCount} 条 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? ` · 已屏蔽乱码 ${suppressedArticleCount} 条` : ""}`}</p></div></div>
     </dl>
     <p class="quality-scope-note">${REPORT_LOCALE === "en" ? "AI enrichment applies to displayed items. The publication quality review is a category sample, not full factual verification." : "AI 逐条精炼只覆盖前端精选内容；发布前质量审核为分栏抽检，不代表对全部候选逐条事实核验。"}</p>
   </section>`;
@@ -1059,13 +1109,14 @@ export function renderHtml(
       <h2>${REPORT_LOCALE === "en" ? "Selection principles" : "筛选原则"}</h2>
       <div class="principle-grid">
         <div><h3>${REPORT_LOCALE === "en" ? "Public brief" : "公共日报"}</h3><p>${escapeHtml(filterText.rules)}</p></div>
-        <div><h3>${REPORT_LOCALE === "en" ? "Personalized brief" : "用户个性化"}</h3><p>${REPORT_LOCALE === "en" ? "Your keywords add to the public rules. They do not replace source, freshness, or quality gates." : "用户提交的关注词只在公共规则之上做增量筛选，不替代来源、时效和质量门禁。"}</p></div>
+        <div><h3>${REPORT_LOCALE === "en" ? "Personalized brief" : "用户个性化"}</h3><p>${REPORT_LOCALE === "en" ? "Locked keywords select incremental stories from the eligible candidate pool after deduplication and freshness gates. Public selections are not repeated." : "锁定词汇从去重、时效门禁后的初筛候选池增量选取内容；公共日报已选内容不重复显示。"}</p></div>
       </div>
     </div>
     <form class="reader-keyword-form" id="readerKeywordForm">
-      <label for="readerKeywordsInput">${REPORT_LOCALE === "en" ? "My selection keywords" : "我的筛选原则词汇"}</label>
-      <div class="reader-keyword-row"><input id="readerKeywordsInput" type="search" maxlength="120" autocomplete="off" enterkeyhint="done" aria-describedby="readerKeywordHint" placeholder="${REPORT_LOCALE === "en" ? "Suggested: AI agents, robotics, semiconductors, new energy" : "建议词：AI Agent、机器人、半导体、新能源、出海"}" value="${escapeHtml(effectiveFilterProfile.customKeywords.join("、"))}"><button id="readerKeywordSaveButton" type="submit">${REPORT_LOCALE === "en" ? "Save and apply" : "保存并应用"}</button></div>
-      <p id="readerKeywordHint" role="status" aria-live="polite">${REPORT_LOCALE === "en" ? "Choose up to 8 current topics from Hot Tags below. Matching stories remain highlighted in this edition." : "最多保存 8 个词；建议从下方热点标签选择，应用后会标记当前日报中的匹配内容。"}</p>
+      <div class="reader-keyword-label"><label for="readerKeywordsInput">${REPORT_LOCALE === "en" ? "Personalized filter keywords" : "个性化筛选词汇"}</label><span id="readerKeywordCount" aria-hidden="true">0/8</span></div>
+      <div class="reader-keyword-row"><input id="readerKeywordsInput" type="search" maxlength="120" autocomplete="off" enterkeyhint="done" aria-describedby="readerKeywordHint readerKeywordScope" placeholder="${REPORT_LOCALE === "en" ? "Suggested: AI agents, robotics, semiconductors, new energy" : "建议词：AI Agent、机器人、半导体、新能源、出海"}" value="${escapeHtml(effectiveFilterProfile.customKeywords.join("、"))}"><button id="readerKeywordSaveButton" type="submit">${REPORT_LOCALE === "en" ? "Lock keywords" : "锁定词汇"}</button></div>
+      <p id="readerKeywordHint" role="status" aria-live="polite">${REPORT_LOCALE === "en" ? "0/8 entered; 8 remaining. Choose useful topics from Hot Tags below." : "已输入 0/8 个，还可添加 8 个。建议从下方热点标签选择。"}</p>
+      <p id="readerKeywordScope" class="reader-keyword-scope">${REPORT_LOCALE === "en" ? "Scope: eligible candidate pool. The public selection is unchanged." : "作用范围：初筛候选池；公共精选不受影响。"}</p>
     </form>
   </section>`;
   const reviewDetailsHtml = reviewHtml(review);
@@ -1101,8 +1152,7 @@ export function renderHtml(
     --cat-tech: #247bff;
     --cat-finance: #009e74;
     --cat-politics: #7c4dff;
-    --cat-trading: #e06b00;
-    --cat-community: #d13c8a;
+    --cat-personalized: #147d64;
     --section-accent: var(--cat-trending);
     --section-wash: #fff0ef;
     --hero-grad-from: #eaf3ff;
@@ -1135,8 +1185,7 @@ export function renderHtml(
       --cat-tech: #75b4ff;
       --cat-finance: #49d9ac;
       --cat-politics: #b99cff;
-      --cat-trading: #ffac5c;
-      --cat-community: #ff82c2;
+      --cat-personalized: #58d7b1;
       --section-wash: #1b2230;
       --hero-grad-from: #172b45;
       --hero-grad-to: #0f1d31;
@@ -1162,10 +1211,9 @@ export function renderHtml(
   }
   body[data-active-category="trending"] { --section-accent: var(--cat-trending); }
   body[data-active-category="tech"] { --section-accent: var(--cat-tech); }
-  body[data-active-category="trading"] { --section-accent: var(--cat-trading); }
   body[data-active-category="politics"] { --section-accent: var(--cat-politics); }
   body[data-active-category="finance"] { --section-accent: var(--cat-finance); }
-  body[data-active-category="community"] { --section-accent: var(--cat-community); }
+  body[data-active-category="personalized"] { --section-accent: var(--cat-personalized); }
   main {
     max-width: 1180px;
     margin: 0 auto;
@@ -1591,16 +1639,19 @@ export function renderHtml(
   .principle-grid h3 { margin: 0; font-size: 0.72rem; color: var(--fg); }
   .principle-grid p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.68rem; line-height: 1.55; }
   .reader-keyword-form { margin-top: 0.8rem; }
-  .reader-keyword-form label { display: block; margin-bottom: 0.3rem; color: var(--fg-soft); font-size: 0.7rem; font-weight: 700; }
+  .reader-keyword-label { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.3rem; }
+  .reader-keyword-form label { display: block; color: var(--fg-soft); font-size: 0.7rem; font-weight: 700; }
+  .reader-keyword-label span { color: var(--muted); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
   .reader-keyword-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; }
   .reader-keyword-row input { min-width: 0; border: 1px solid var(--rule); border-radius: 0.35rem; padding: 0.52rem 0.6rem; background: var(--bg-elevated); color: var(--fg); font: inherit; font-size: 0.72rem; }
+  .reader-keyword-row input[readonly] { cursor: default; background: color-mix(in srgb, var(--bg-elevated) 88%, var(--section-wash)); }
   .reader-keyword-row button { border: 0; border-radius: 0.35rem; padding: 0.52rem 0.72rem; background: var(--accent); color: var(--accent-fg); font: inherit; font-size: 0.7rem; font-weight: 700; cursor: pointer; }
   .reader-keyword-row button:disabled { cursor: default; opacity: 0.52; }
   .reader-keyword-form > p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.66rem; line-height: 1.55; }
+  .reader-keyword-form > p.reader-keyword-scope { color: var(--fg-soft); }
   .reader-keyword-form.saved .reader-keyword-row input { border-color: #176b45; }
   .reader-keyword-form.dirty .reader-keyword-row input { border-color: var(--link); box-shadow: 0 0 0 2px color-mix(in srgb, var(--link) 12%, transparent); }
-  .article.keyword-match { background: color-mix(in srgb, var(--link) 8%, var(--bg-elevated)); border-left-color: var(--link); }
-  .article.keyword-dimmed { opacity: 0.38; }
+  .personalized-scope { margin: 0 0 0.7rem; color: var(--muted); font-size: 0.7rem; line-height: 1.55; }
   .run-console {
     margin: 0.85rem 0 1.25rem;
     padding: 0.8rem 0;
@@ -2443,10 +2494,9 @@ export function renderHtml(
 	  }
 	  .tab[data-tab="trending"] { --tab-color: var(--cat-trending); }
 	  .tab[data-tab="tech"] { --tab-color: var(--cat-tech); }
-	  .tab[data-tab="trading"] { --tab-color: var(--cat-trading); }
 	  .tab[data-tab="politics"] { --tab-color: var(--cat-politics); }
 	  .tab[data-tab="finance"] { --tab-color: var(--cat-finance); }
-	  .tab[data-tab="community"] { --tab-color: var(--cat-community); }
+	  .tab[data-tab="personalized"] { --tab-color: var(--cat-personalized); }
 	  .tab .count {
 	    background: color-mix(in srgb, var(--tab-color) 10%, var(--bg-elevated));
 	    color: inherit;
@@ -2706,10 +2756,9 @@ export function renderHtml(
 	  }
 	  .stream-section[data-panel="trending"] { --section-color: var(--cat-trending); }
 	  .stream-section[data-panel="tech"] { --section-color: var(--cat-tech); }
-	  .stream-section[data-panel="trading"] { --section-color: var(--cat-trading); }
 	  .stream-section[data-panel="politics"] { --section-color: var(--cat-politics); }
 	  .stream-section[data-panel="finance"] { --section-color: var(--cat-finance); }
-	  .stream-section[data-panel="community"] { --section-color: var(--cat-community); }
+	  .stream-section[data-panel="personalized"] { --section-color: var(--cat-personalized); }
 	  .stream-section .stream-category-heading { border-bottom-color: color-mix(in srgb, var(--section-color) 58%, var(--rule)); }
 	  .stream-section .sub-tabs,
 	  .stream-section .source-tabs { border-color: color-mix(in srgb, var(--section-color) 34%, var(--rule)); }
@@ -2953,7 +3002,7 @@ export function renderHtml(
 	  }
 	</style>
 </head>
-<body data-active-category="${raw.trending.length > 0 ? "trending" : "tech"}">
+<body data-active-category="${initialCategory}">
 <main>
   <header class="report-header">
       <span class="eyebrow">${STR.siteTitle}</span>
@@ -2982,19 +3031,18 @@ export function renderHtml(
   <div class="stream-layout">
   <aside class="stream-navigation">
   <nav class="tabs" aria-label="${REPORT_LOCALE === "en" ? "Section navigation" : "栏目定位"}">
-    ${raw.trending.length > 0 ? `<button class="tab active" type="button" data-scroll-target="${streamAnchor("category", "trending")}" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
-    <button class="tab${raw.trending.length > 0 ? "" : " active"}" type="button" data-scroll-target="${streamAnchor("category", "tech")}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
-    ${trading ? `<button class="tab" type="button" data-scroll-target="${streamAnchor("category", "trading")}" data-tab="trading">${STR.catTrading}<span class="count">${trading.tickers.length}</span></button>` : ""}
+    ${counts.personalized > 0 ? `<button class="tab active" type="button" data-scroll-target="${streamAnchor("category", "personalized")}" data-tab="personalized">${REPORT_LOCALE === "en" ? "Personalized" : "用户个性化"}<span class="count">${counts.personalized}</span></button>` : ""}
+    ${raw.trending.length > 0 ? `<button class="tab${counts.personalized > 0 ? "" : " active"}" type="button" data-scroll-target="${streamAnchor("category", "trending")}" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
+    <button class="tab${counts.personalized === 0 && raw.trending.length === 0 ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("category", "tech")}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
     <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "politics")}" data-tab="politics">${CATEGORY_LABELS.politics}<span class="count">${counts.politics}</span></button>
     <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "finance")}" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>
-    ${techCommunitySubs.length > 0 ? `<button class="tab" type="button" data-scroll-target="${streamAnchor("category", "community")}" data-tab="community">${STR.catCommunity}<span class="count">${counts.community}</span></button>` : ""}
   </nav>
   <div class="mobile-context-navigation" id="mobileContextNavigation">
     <nav id="mobileSubTabs" aria-label="${REPORT_LOCALE === "en" ? "Current section shortcuts" : "当前二级栏目定位"}"></nav>
     <nav id="mobileSourceTabs" aria-label="${REPORT_LOCALE === "en" ? "Current source shortcuts" : "当前信息源定位"}" hidden></nav>
   </div>
   <div class="reading-context" aria-live="polite">
-    <p class="reading-context-path"><span id="currentCategory">${raw.trending.length > 0 ? STR.catTrending : CATEGORY_LABELS.tech}</span><span id="currentSubcategory"></span></p>
+    <p class="reading-context-path"><span id="currentCategory">${initialCategoryLabel}</span><span id="currentSubcategory"></span></p>
     <p class="reading-context-detail"><span id="currentTags">${REPORT_LOCALE === "en" ? "All topics" : "全部标签"}</span><span id="readingPosition">1 / ${Math.max(1, totalStreamItems)}</span></p>
     <div class="reading-progress"><span id="readingProgressBar"></span></div>
   </div>
@@ -3002,6 +3050,10 @@ export function renderHtml(
   </aside>
 
   <div class="stream-feed" data-total-items="${totalStreamItems}">
+  ${counts.personalized > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "personalized")}" data-panel="personalized" data-category-label="${REPORT_LOCALE === "en" ? "Personalized" : "用户个性化"}">
+    <header class="stream-category-heading"><h2>${REPORT_LOCALE === "en" ? "Personalized" : "用户个性化"}</h2><span>${counts.personalized}</span></header>
+    ${renderPersonalizedPanel(personalizedArticles)}
+  </section>` : ""}
   <section class="panel stream-section active" id="${streamAnchor("category", "trending")}" data-panel="trending" data-category-label="${escapeHtml(STR.catTrending)}">
     <header class="stream-category-heading"><h2>${STR.catTrending}</h2><span>${counts.trending}</span></header>
     ${renderRawCategoryPanel("trending", raw.trending, "trending", categorySummaries)}
@@ -3010,7 +3062,6 @@ export function renderHtml(
     <header class="stream-category-heading"><h2>${CATEGORY_LABELS.tech}</h2><span>${counts.tech}</span></header>
     ${renderRawCategoryPanel("tech", techMainSubs, "tech", categorySummaries)}
   </section>
-  ${trading ? `<section class="panel stream-section active" id="${streamAnchor("category", "trading")}" data-panel="trading" data-category-label="${escapeHtml(STR.catTrading)}"><header class="stream-category-heading"><h2>${STR.catTrading}</h2><span>${trading.tickers.length}</span></header>${renderTradingPanel(trading)}</section>` : ""}
   <section class="panel stream-section active" id="${streamAnchor("category", "politics")}" data-panel="politics" data-category-label="${escapeHtml(CATEGORY_LABELS.politics)}">
     <header class="stream-category-heading"><h2>${CATEGORY_LABELS.politics}</h2><span>${counts.politics}</span></header>
     ${renderRawCategoryPanel("politics", raw.politics, "politics", categorySummaries)}
@@ -3019,9 +3070,6 @@ export function renderHtml(
     <header class="stream-category-heading"><h2>${CATEGORY_LABELS.finance}</h2><span>${counts.finance}</span></header>
     ${renderRawCategoryPanel("finance", raw.finance, "finance", categorySummaries)}
   </section>
-  ${techCommunitySubs.length > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "community")}" data-panel="community" data-category-label="${escapeHtml(STR.catCommunity)}"><header class="stream-category-heading"><h2>${STR.catCommunity}</h2><span>${counts.community}</span></header>
-    ${renderRawCategoryPanel("tech", techCommunitySubs, "community", categorySummaries)}
-  </section>` : ""}
   <div class="stream-loader" id="streamLoader" aria-live="polite">${REPORT_LOCALE === "en" ? "Loading more" : "继续下滑，自动接入更多信息"}</div>
   </div>
   </div>
@@ -3035,9 +3083,11 @@ export function renderHtml(
     var form = document.getElementById('readerKeywordForm');
     var input = document.getElementById('readerKeywordsInput');
     var hint = document.getElementById('readerKeywordHint');
+    var count = document.getElementById('readerKeywordCount');
     var saveButton = document.getElementById('readerKeywordSaveButton');
-    if (!form || !input || !hint || !saveButton) return;
+    if (!form || !input || !hint || !count || !saveButton) return;
     var savedValue = '';
+    var locked = false;
 
     function normalizeReaderKeywords(raw) {
       var values = String(raw || '').split(/[\\n,，、;；|]+/);
@@ -3075,35 +3125,30 @@ export function renderHtml(
       return '';
     }
 
-    function applyKeywords(keywords) {
-      var normalized = keywords.map(function (keyword) { return keyword.toLocaleLowerCase(); });
-      var matches = 0;
-      var firstMatch = null;
-      document.querySelectorAll('.article').forEach(function (article) {
-        var haystack = ((article.dataset.tags || '') + ' ' + (article.textContent || '')).toLocaleLowerCase();
-        var matched = normalized.length > 0 && normalized.some(function (keyword) { return haystack.indexOf(keyword) !== -1; });
-        article.classList.toggle('keyword-match', matched);
-        article.classList.toggle('keyword-dimmed', normalized.length > 0 && !matched);
-        if (matched) {
-          matches++;
-          if (!firstMatch) firstMatch = article;
-        }
-      });
-      if (normalized.length > 0 && matches === 0) {
-        document.querySelectorAll('.article.keyword-dimmed').forEach(function (article) {
-          article.classList.remove('keyword-dimmed');
-        });
-      }
-      if (firstMatch) document.dispatchEvent(new CustomEvent('dailybrief:reveal-article', { detail: { article: firstMatch } }));
-      return matches;
+    function keywordCountText() {
+      var amount = normalizeReaderKeywords(input.value).length;
+      return '${REPORT_LOCALE === "en" ? "" : "已输入 "}' + amount + '/8${REPORT_LOCALE === "en" ? " entered; " : " 个，还可添加 "}' + (8 - amount) + '${REPORT_LOCALE === "en" ? " remaining." : " 个。"}';
+    }
+
+    function updateKeywordCount() {
+      count.textContent = normalizeReaderKeywords(input.value).length + '/8';
+    }
+
+    function setLockedState(nextLocked) {
+      locked = Boolean(nextLocked && savedValue);
+      input.readOnly = locked;
+      input.setAttribute('aria-readonly', locked ? 'true' : 'false');
+      form.classList.toggle('locked', locked);
+      saveButton.disabled = !locked && !keywordValue();
+      saveButton.textContent = locked
+        ? '${REPORT_LOCALE === "en" ? "Unlock" : "解除锁定"}'
+        : '${REPORT_LOCALE === "en" ? "Lock keywords" : "锁定词汇"}';
+      updateKeywordCount();
     }
 
     function setCleanState() {
       form.classList.remove('dirty');
-      saveButton.disabled = true;
-      saveButton.textContent = savedValue
-        ? '${REPORT_LOCALE === "en" ? "Applied" : "已应用"}'
-        : '${REPORT_LOCALE === "en" ? "No keywords" : "暂无词汇"}';
+      setLockedState(Boolean(savedValue));
     }
 
     function setDirtyState() {
@@ -3115,13 +3160,16 @@ export function renderHtml(
       saveButton.textContent = dirty && !keywordValue() && savedValue
         ? '${REPORT_LOCALE === "en" ? "Clear and reset" : "清空并恢复公共日报"}'
         : (dirty
-          ? '${REPORT_LOCALE === "en" ? "Save and apply" : "保存并应用"}'
-          : (savedValue ? '${REPORT_LOCALE === "en" ? "Applied" : "已应用"}' : '${REPORT_LOCALE === "en" ? "No keywords" : "暂无词汇"}'));
+          ? '${REPORT_LOCALE === "en" ? "Lock keywords" : "锁定词汇"}'
+          : (savedValue ? '${REPORT_LOCALE === "en" ? "Lock keywords" : "锁定词汇"}' : '${REPORT_LOCALE === "en" ? "No keywords" : "暂无词汇"}'));
+      updateKeywordCount();
       if (validationError) {
         saveButton.textContent = '${REPORT_LOCALE === "en" ? "Adjust keywords" : "请调整词汇"}';
         hint.textContent = validationError;
       } else if (dirty) {
-        hint.textContent = '${REPORT_LOCALE === "en" ? "Unsaved changes. Save to highlight matching stories in this edition." : "词汇已修改，点击“保存并应用”后将立即标记当前日报中的匹配内容。"}';
+        hint.textContent = keywordCountText() + '${REPORT_LOCALE === "en" ? " Lock them to use the eligible candidate pool in the next run." : " 锁定并同步后，将在下一次抓取中从初筛候选池做增量筛选。"}';
+      } else {
+        hint.textContent = keywordCountText() + '${REPORT_LOCALE === "en" ? " Choose useful topics from Hot Tags below." : " 建议从下方热点标签选择。"}';
       }
     }
 
@@ -3139,7 +3187,6 @@ export function renderHtml(
         else localStorage.removeItem('dailybrief.readerKeywords');
         persisted = true;
       } catch (_) {}
-      var matches = applyKeywords(keywords);
       if (!persisted) {
         form.classList.add('dirty');
         saveButton.disabled = false;
@@ -3150,18 +3197,55 @@ export function renderHtml(
       savedValue = input.value;
       form.classList.add('saved');
       hint.textContent = keywords.length
-        ? ('${REPORT_LOCALE === "en" ? "Saved on this device and applied to this edition: " : "已保存在本机，并应用到当前日报：匹配 "}' + matches + '${REPORT_LOCALE === "en" ? " stories." : " 条内容。"}')
+        ? ('${REPORT_LOCALE === "en" ? "Locked " : "已锁定 "}' + keywords.length + '/8${REPORT_LOCALE === "en" ? " keywords; syncing for the next run." : " 个词汇，正在同步到下一次抓取规则。"}')
         : '${REPORT_LOCALE === "en" ? "No custom keywords saved; the public brief rules remain active." : "未保存自定义词，将继续使用公共日报筛选原则。"}';
       setCleanState();
+      syncKeywords(keywords);
       window.setTimeout(function () { form.classList.remove('saved'); }, 1600);
       return keywords;
     }
 
-    form.addEventListener('submit', function (event) { event.preventDefault(); saveKeywords(); });
+    function syncKeywords(keywords) {
+      if (typeof fetch !== 'function') return;
+      fetch('/api/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords: keywords }),
+      }).then(function (response) {
+        if (!response.ok) throw new Error('sync unavailable');
+        return response.json();
+      }).then(function (result) {
+        var synced = normalizeReaderKeywords(result && result.keywords).join('、');
+        if (synced !== keywords.join('、')) throw new Error('sync mismatch');
+        hint.textContent = keywords.length
+          ? ('${REPORT_LOCALE === "en" ? "Synced " : "已同步 "}' + keywords.length + '/8${REPORT_LOCALE === "en" ? " keywords. The next run will select incremental stories from the eligible candidate pool." : " 个词汇；下一次抓取将从初筛候选池增量筛选，并生成“用户个性化”栏目。"}')
+          : '${REPORT_LOCALE === "en" ? "Server keywords cleared; future runs use only public rules." : "服务器个性化词汇已清空，后续抓取仅使用公共日报规则。"}';
+      }).catch(function () {
+        hint.textContent = keywords.length
+          ? '${REPORT_LOCALE === "en" ? "Saved on this device, but account sync is unavailable; the next run will not use these keywords yet." : "词汇仅保存在本设备；当前站点未连接偏好同步服务，下一次抓取暂时不会使用。"}'
+          : '${REPORT_LOCALE === "en" ? "Cleared on this device; server sync is unavailable." : "已清空本设备词汇；当前站点未连接偏好同步服务。"}';
+      });
+    }
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (locked) {
+        setLockedState(false);
+        hint.textContent = keywordCountText() + '${REPORT_LOCALE === "en" ? " Unlocked; edit the keywords, then lock them again." : " 已解除锁定；修改后请重新锁定。"}';
+        input.focus();
+        return;
+      }
+      saveKeywords();
+    });
     input.addEventListener('input', setDirtyState);
     document.addEventListener('dailybrief:tag-suggest', function (event) {
       var tag = event.detail && event.detail.tag ? String(event.detail.tag) : '';
       if (!tag) return;
+      if (locked) {
+        hint.textContent = '${REPORT_LOCALE === "en" ? "Keywords are locked. Unlock them before adding a Hot Tag." : "词汇已锁定，请先解除锁定，再添加热点标签。"}';
+        saveButton.focus();
+        return;
+      }
       var keywords = normalizeReaderKeywords(input.value);
       if (keywords.length >= 8) {
         hint.textContent = '${REPORT_LOCALE === "en" ? "Up to 8 keywords are allowed. Remove one before adding another." : "最多保存 8 个词，请先删除一个词再添加。"}';
@@ -3170,7 +3254,7 @@ export function renderHtml(
       if (!keywords.some(function (item) { return item.toLocaleLowerCase() === tag.toLocaleLowerCase(); })) keywords.push(tag);
       input.value = normalizeReaderKeywords(keywords.join('、')).join('、');
       setDirtyState();
-      hint.textContent = '${REPORT_LOCALE === "en" ? "Topic added. Save and apply it to this edition." : "已加入热点词“"}' + tag + '${REPORT_LOCALE === "en" ? "" : "”，点击“保存并应用”后生效。"}';
+      hint.textContent = keywordCountText() + '${REPORT_LOCALE === "en" ? " Topic added; lock the keywords to apply it." : " 已加入热点词“"}' + tag + '${REPORT_LOCALE === "en" ? "" : "”，锁定后生效。"}';
       input.focus();
     });
     try {
@@ -3179,8 +3263,10 @@ export function renderHtml(
     } catch (_) {}
     savedValue = keywordValue();
     input.value = savedValue;
-    applyKeywords(normalizeReaderKeywords(savedValue));
     setCleanState();
+    hint.textContent = savedValue
+      ? keywordCountText() + '${REPORT_LOCALE === "en" ? " Locked on this device. A successful sync is required for the next run." : " 已锁定并保存在本设备；同步成功后才会进入下一次抓取。"}'
+      : keywordCountText() + '${REPORT_LOCALE === "en" ? " Choose useful topics from Hot Tags below." : " 建议从下方热点标签选择。"}';
 
   })();
 

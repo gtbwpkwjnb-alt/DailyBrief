@@ -1207,8 +1207,6 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
 6. **国际时政**：媒体所属国与文章涉及国是否区分；同一冲突、声明或行动的重复条目是否应合并。
 7. **发布阻断条件**：只有原文不支持的严重事实结论、明显编造、缺少摘要、未翻译或整栏不可用才设 passed=false。
 8. **非阻断问题**：重复事件、热搜措辞偏猜测、单条题材关联弱、来源比例不理想，写入 suggestions，不要因此设 passed=false。
-???????????/????????????????????????????????????????????
-
 只有缺少摘要、展示内容未翻译、存在无依据结论等发布级问题才设 passed=false；轻微文风建议和可优化的重复必须保持 passed=true。
 
 输出严格 JSON 对象：
@@ -1216,8 +1214,17 @@ const AI_REVIEW_SYSTEM_PROMPT_ZH = `你是一名日报质量审核编辑。负�
   "passed": true/false,
   "summary": "<50-100 字的整体评价>",
   "issues": ["问题1", "问题2", ...],
-  "suggestions": ["建议1", "建议2", ...]
+  "suggestions": ["建议1", "建议2", ...],
+  "blockingScope": "none|items|systemic",
+  "blockingItems": [
+    { "url": "<输入中该条目的完整 URL>", "category": "<栏目 key>", "reason": "<阻断原因>" }
+  ]
 }
+
+当 passed=false 且问题只涉及具体条目时，blockingScope 必须为 "items"，
+并把输入里的完整 URL 原样复制到 blockingItems；不得猜测、缩短或改写 URL。
+当整栏不可用或无法精确定位到输入中的具体条目时，blockingScope 必须为 "systemic"。
+当 passed=true 时，blockingScope 必须为 "none" 且 blockingItems 为空数组。
 
 如果全部合格，issues 和 suggestions 可以为空数组。`;
 
@@ -1246,8 +1253,18 @@ Output STRICTLY JSON:
   "passed": true/false,
   "summary": "<50-100 word overall assessment>",
   "issues": ["issue1", "issue2", ...],
-  "suggestions": ["suggestion1", ...]
+  "suggestions": ["suggestion1", ...],
+  "blockingScope": "none|items|systemic",
+  "blockingItems": [
+    { "url": "<exact item URL from the input>", "category": "<section label>", "reason": "<unsupported claim or other blocker>" }
+  ]
 }
+
+When passed=false because one or more specific items are unsafe, set
+blockingScope="items" and copy each exact URL from the input into
+blockingItems. Use blockingScope="systemic" when a whole section is unusable
+or the blocker cannot be tied to an exact input item. Never invent or shorten
+URLs. Use blockingScope="none" and an empty blockingItems array when passed=true.
 
 Empty arrays if all good.`;
 
@@ -1262,6 +1279,60 @@ export interface ReviewResult {
   reviewState: "passed" | "failed" | "unavailable";
   publicationState: "eligible" | "blocked" | "limited";
   failureCodes: string[];
+  blockingScope: "none" | "items" | "systemic";
+  blockingItems: ReviewBlockingItem[];
+  recovery?: {
+    suppressedCount: number;
+    suppressedItems: ReviewBlockingItem[];
+    originalFailureCodes: string[];
+  };
+}
+
+export interface ReviewBlockingItem {
+  url: string;
+  category?: string;
+  reason: string;
+}
+
+export interface ReviewRecoveryResolution {
+  recoverable: boolean;
+  urls: string[];
+  unresolved: ReviewBlockingItem[];
+  reason?: "not_failed" | "systemic" | "missing_items" | "unresolved_items";
+}
+
+/**
+ * Resolves structured review blockers against the exact articles sent to the
+ * reviewer. A failed legacy/unstructured response deliberately remains fatal.
+ */
+export function resolveReviewBlockingItems(
+  review: ReviewResult,
+  articles: Array<{ url: string; category?: string }>,
+): ReviewRecoveryResolution {
+  if (review.reviewState !== "failed") {
+    return { recoverable: false, urls: [], unresolved: [], reason: "not_failed" };
+  }
+  if (review.blockingScope === "systemic") {
+    return { recoverable: false, urls: [], unresolved: review.blockingItems, reason: "systemic" };
+  }
+  if (review.blockingScope !== "items" || review.blockingItems.length === 0) {
+    return { recoverable: false, urls: [], unresolved: review.blockingItems, reason: "missing_items" };
+  }
+
+  const articleByUrl = new Map(articles.map((article) => [article.url, article]));
+  const unresolved: ReviewBlockingItem[] = [];
+  const urls = new Set<string>();
+  for (const blocker of review.blockingItems) {
+    const article = articleByUrl.get(blocker.url);
+    if (!article) {
+      unresolved.push(blocker);
+      continue;
+    }
+    urls.add(article.url);
+  }
+  return unresolved.length === 0 && urls.size > 0
+    ? { recoverable: true, urls: [...urls], unresolved: [] }
+    : { recoverable: false, urls: [...urls], unresolved, reason: "unresolved_items" };
 }
 
 export type ReviewRunner = typeof runLlm;
@@ -1281,22 +1352,44 @@ export async function aiReview(
       timeoutMs: 30_000,
     });
     const cleaned = extractJson(text);
-    let parsed: ReviewResult;
+    let parsed: Partial<ReviewResult>;
     try {
       parsed = JSON.parse(cleaned);
     } catch {
       parsed = JSON.parse(jsonrepair(cleaned));
     }
-    const issues = parsed.issues ?? [];
+    const issues = Array.isArray(parsed.issues) ? parsed.issues.filter((issue): issue is string => typeof issue === "string") : [];
+    const blockingItems = Array.isArray(parsed.blockingItems)
+      ? parsed.blockingItems.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const candidate = item as Partial<ReviewBlockingItem>;
+          if (typeof candidate.url !== "string" || !/^https?:\/\//i.test(candidate.url) || typeof candidate.reason !== "string" || !candidate.reason.trim()) return [];
+          return [{
+            url: candidate.url,
+            category: typeof candidate.category === "string" ? candidate.category : undefined,
+            reason: candidate.reason.trim(),
+          }];
+        })
+      : [];
     const hasBlockingIssue = parsed.passed === false || issues.some((issue) => /编造|捏造|幻觉|不实|无依据|事实错误|事实性错误|严重错误|缺少摘要|无摘要|未翻译|unsupported|fabricat|hallucin|false claim/i.test(issue));
+    const requestedScope = parsed.blockingScope;
+    const blockingScope: ReviewResult["blockingScope"] = !hasBlockingIssue
+      ? "none"
+      : requestedScope === "items" && blockingItems.length > 0
+        ? "items"
+        : "systemic";
     return {
       passed: !hasBlockingIssue,
       summary: parsed.summary ?? "",
       issues,
-      suggestions: parsed.suggestions ?? [],
+      suggestions: Array.isArray(parsed.suggestions)
+        ? parsed.suggestions.filter((suggestion): suggestion is string => typeof suggestion === "string")
+        : [],
       reviewState: hasBlockingIssue ? "failed" : "passed",
       publicationState: hasBlockingIssue ? "blocked" : "eligible",
       failureCodes: hasBlockingIssue ? ["AI_REVIEW_BLOCKED"] : [],
+      blockingScope,
+      blockingItems: hasBlockingIssue ? blockingItems : [],
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -1309,6 +1402,8 @@ export async function aiReview(
       reviewState: "unavailable",
       publicationState: "blocked",
       failureCodes: ["AI_REVIEW_UNAVAILABLE"],
+      blockingScope: "systemic",
+      blockingItems: [],
     };
   }
 }

@@ -88,6 +88,7 @@ const runStatsSchema = z.object({
   fetchedArticles: z.number().int().nonnegative(),
   dedupedArticles: z.number().int().nonnegative(),
   displayedArticles: z.number().int().nonnegative().optional(),
+  personalizedArticles: z.number().int().nonnegative().optional(),
   aiEnrichedArticles: z.number().int().nonnegative().optional(),
   enrichmentVersion: z.number().int().positive().optional(),
   suppressedArticles: z.number().int().nonnegative().optional(),

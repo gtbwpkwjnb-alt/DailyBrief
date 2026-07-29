@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { groupRaw, renderHtml } from "../lib/output/render";
+import { groupRaw, renderHtml, selectPersonalizedArticles } from "../lib/output/render";
 import { sources } from "../lib/sources/registry";
 import type { ArticleInput, DailyReport } from "../lib/ai/pipeline";
 
@@ -188,17 +188,23 @@ test("reader preferences and hot-tag suggestions work without a backend", async 
   const html = renderHtml(report, groupRaw(articles, sources), "2026-07-24", []);
 
   await page.route("http://dailybrief.test/preferences", (route) => route.fulfill({ contentType: "text/html", body: html }));
+  await page.route("http://dailybrief.test/api/preferences", async (route) => {
+    const body = route.request().postDataJSON() as { keywords: string[] };
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ keywords: body.keywords, appliesTo: "next_run" }) });
+  });
   await page.goto("http://dailybrief.test/preferences");
   await expect(page.locator("#readerKeywordsInput")).toHaveAttribute("placeholder", /AI Agent/);
   await page.locator(".brief-meta-summary").click();
   await page.locator(".tag-cloud-chip[data-tag='AI Agent']").click();
   await expect(page.locator("#readerKeywordsInput")).toHaveValue("AI Agent");
   await expect(page.locator("#readerKeywordHint")).toContainText("已加入热点词");
-  await expect(page.getByRole("button", { name: "保存并应用" })).toBeEnabled();
+  await expect(page.locator("#readerKeywordCount")).toHaveText("1/8");
+  await expect(page.getByRole("button", { name: "锁定词汇" })).toBeEnabled();
   await expect.poll(() => page.evaluate("localStorage.getItem('dailybrief.readerKeywords')")).toBeNull();
-  await page.getByRole("button", { name: "保存并应用" }).click();
-  await expect(page.locator("#readerKeywordHint")).toContainText("已保存在本机");
-  await expect(page.locator(".article.keyword-match")).toHaveCount(1);
+  await page.getByRole("button", { name: "锁定词汇" }).click();
+  await expect(page.locator("#readerKeywordHint")).toContainText("下一次抓取将从初筛候选池增量筛选");
+  await expect(page.locator("#readerKeywordsInput")).toHaveAttribute("readonly", "");
+  await expect(page.locator(".article.keyword-match, .article.keyword-dimmed")).toHaveCount(0);
   await expect(page.locator(".industry-lab")).toHaveCount(0);
   await expect(page.getByText("行业分析简报")).toHaveCount(0);
 });
@@ -223,38 +229,85 @@ test("reader keyword form saves normalized terms, gives feedback, and restores t
   const hint = page.locator("#readerKeywordHint");
 
   await page.route("http://dailybrief.test/keyword-form", (route) => route.fulfill({ contentType: "text/html", body: html }));
+  await page.route("http://dailybrief.test/api/preferences", async (route) => {
+    const body = route.request().postDataJSON() as { keywords: string[] };
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ keywords: body.keywords, appliesTo: "next_run" }) });
+  });
   await page.goto("http://dailybrief.test/keyword-form");
   await page.locator(".brief-meta-summary").click();
+  await expect(page.locator("#readerKeywordHint")).toContainText("已输入 0/8 个，还可添加 8 个");
   await input.fill("词1、词2、词3、词4、词5、词6、词7、词8、词9");
+  await expect(page.locator("#readerKeywordCount")).toHaveText("8/8");
   await expect(page.getByRole("button", { name: "请调整词汇" })).toBeDisabled();
   await expect(hint).toContainText("最多保存 8 个词");
   await input.fill(" AI Agent,机器人；ai agent | 半导体 ");
-  await expect(page.getByRole("button", { name: "保存并应用" })).toBeEnabled();
-  await page.getByRole("button", { name: "保存并应用" }).click();
+  await expect(page.locator("#readerKeywordHint")).toContainText("已输入 3/8 个，还可添加 5 个");
+  await expect(page.getByRole("button", { name: "锁定词汇" })).toBeEnabled();
+  await page.getByRole("button", { name: "锁定词汇" }).click();
 
   await expect(input).toHaveValue("AI Agent、机器人、半导体");
-  await expect(hint).toContainText("已保存在本机");
-  await expect(hint).toContainText("匹配 1 条内容");
+  await expect(hint).toContainText("已同步 3/8 个词汇");
+  await expect(hint).toContainText("下一次抓取将从初筛候选池增量筛选");
   await expect(form).toHaveClass(/saved/);
-  await expect(page.getByRole("button", { name: "已应用" })).toBeDisabled();
-  await expect(page.locator(".article.keyword-match")).toHaveCount(1);
+  await expect(input).toHaveAttribute("readonly", "");
+  await expect(page.getByRole("button", { name: "解除锁定" })).toBeEnabled();
+  await expect(page.locator(".article.keyword-match, .article.keyword-dimmed")).toHaveCount(0);
   await expect.poll(() => page.evaluate("localStorage.getItem('dailybrief.readerKeywords')")).toBe("AI Agent、机器人、半导体");
 
   // Re-rendering the static report simulates reopening the same edition in the browser.
   await page.reload();
   await page.locator(".brief-meta-summary").click();
   await expect(input).toHaveValue("AI Agent、机器人、半导体");
+  await expect(input).toHaveAttribute("readonly", "");
   await expect(input).toHaveAttribute("placeholder", /建议词：AI Agent/);
 
   await page.locator(".tag-cloud-chip[data-tag='AI Agent']").click();
   await expect(input).toHaveValue("AI Agent、机器人、半导体");
+  await expect(hint).toContainText("词汇已锁定");
 
+  await page.getByRole("button", { name: "解除锁定" }).click();
+  await expect(input).not.toHaveAttribute("readonly", "");
+  await expect(hint).toContainText("已解除锁定");
   await input.fill("");
   await page.getByRole("button", { name: "清空并恢复公共日报" }).click();
   await expect(hint).toContainText("未保存自定义词");
-  await expect(page.getByRole("button", { name: "暂无词汇" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "锁定词汇" })).toBeDisabled();
   await expect(page.locator(".article.keyword-match, .article.keyword-dimmed")).toHaveCount(0);
   await expect.poll(() => page.evaluate("localStorage.getItem('dailybrief.readerKeywords')")).toBeNull();
+});
+
+test("personalized section renders only incremental matches from the eligible pool", async ({ page }) => {
+  const candidates: ArticleInput[] = Array.from({ length: 16 }, (_, index) => ({
+    sourceId: "github-trending",
+    source: "GitHub Trending",
+    title: index === 15 ? "Robotics edge platform" : `General platform ${index}`,
+    displayTitle: index === 15 ? "机器人边缘平台进入个性化增量" : `通用平台 ${index}`,
+    url: `https://example.com/personalized-${index}`,
+    category: "tech",
+    summary: index === 15 ? "该项目聚焦机器人边缘推理。" : "通用技术项目。",
+    aiAnalysis: "用于回归测试。",
+    publishedAt: new Date(Date.UTC(2026, 6, 28, 0, 16 - index)),
+  }));
+  const publicRaw = groupRaw(candidates, sources);
+  const personalized = selectPersonalizedArticles(candidates, publicRaw, ["Robotics"]);
+  const html = renderHtml(
+    report,
+    publicRaw,
+    "2026-07-28",
+    [],
+    undefined,
+    undefined,
+    undefined,
+    { baseRules: "公共规则", customKeywords: ["Robotics"], mode: "incremental" },
+    undefined,
+    personalized,
+  );
+  await page.setContent(html);
+  await expect(page.locator(".tab[data-tab='personalized']")).toContainText("用户个性化");
+  await expect(page.locator("[data-panel='personalized'] .article")).toHaveCount(1);
+  await expect(page.locator("[data-panel='personalized']")).toContainText("机器人边缘平台进入个性化增量");
+  await expect(page.locator("[data-panel='personalized']")).toContainText("初筛候选池");
+  await expect(page.locator("[data-panel='tech']")).not.toContainText("机器人边缘平台进入个性化增量");
 });
 
 test("Google Trends cards expose the original query and explain editorial importance", async ({ page }) => {
@@ -417,54 +470,60 @@ test("mobile category spy keeps the active category inside the horizontal naviga
     { sourceId: "github-trending", source: "GitHub Trending", title: "Tech", url: "https://example.com/a", category: "tech", summary: "技术摘要" },
     { sourceId: "bbc-world", source: "BBC World", title: "World", url: "https://example.com/p", category: "politics", summary: "国际摘要" },
     { sourceId: "wallstreetcn", source: "WallstreetCN", title: "Finance", url: "https://example.com/f", category: "finance", summary: "财经摘要" },
-    { sourceId: "v2ex-hot", source: "V2EX", title: "Community", url: "https://example.com/c", category: "tech", summary: "社区摘要" },
   ];
   const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
 
   await page.setContent(html);
-  const communityTab = page.locator(".tab[data-tab='community']");
-  await communityTab.click();
-  await expect(communityTab).toHaveClass(/active/);
-  await expect.poll(async () => communityTab.evaluate((element) => {
+  const financeTab = page.locator(".tab[data-tab='finance']");
+  await financeTab.click();
+  await expect(financeTab).toHaveClass(/active/);
+  await expect.poll(async () => financeTab.evaluate((element) => {
     const tab = element.getBoundingClientRect();
     const nav = element.parentElement!.getBoundingClientRect();
     return tab.left >= nav.left && tab.right <= nav.right;
   })).toBe(true);
 });
 
-test("mobile navigation keeps the current subsection and source directly reachable", async ({ page }) => {
+test("mobile navigation keeps the current subsection directly reachable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const articles: ArticleInput[] = [
-    { sourceId: "v2ex-hot", source: "V2EX", title: "V2EX item", url: "https://example.com/v2ex", category: "tech", summary: "V2EX 摘要" },
-    { sourceId: "huxiu", source: "虎嗅", title: "Huxiu item", url: "https://example.com/huxiu", category: "tech", summary: "虎嗅摘要" },
-    { sourceId: "hackernews", source: "Hacker News", title: "HN item", url: "https://example.com/hn", category: "tech", summary: "Hacker News 摘要" },
+    { sourceId: "github-trending", source: "GitHub Trending", title: "GitHub item", url: "https://example.com/github", category: "tech", summary: "GitHub 摘要" },
+    { sourceId: "qbitai", source: "量子位", title: "QbitAI item", url: "https://example.com/qbitai", category: "tech", summary: "量子位摘要" },
+    { sourceId: "openai-news", source: "OpenAI News", title: "OpenAI item", url: "https://example.com/openai", category: "tech", summary: "OpenAI 摘要" },
   ];
   await page.setContent(renderHtml(report, groupRaw(articles, sources), "2026-07-10", []));
-  await page.locator(".tab[data-tab='community']").click();
+  await page.locator(".tab[data-tab='tech']").click();
 
-  const communitySub = page.locator("#mobileSubTabs .sub-tab[data-sub='cn-community']");
-  await expect(communitySub).toBeVisible();
-  await communitySub.click();
-  await expect(page.locator("#mobileSubTabs .sub-tab[data-sub='cn-community']")).toHaveClass(/active/);
-  await expect(page.locator("#mobileSourceTabs")).toBeVisible();
-
-  const huxiuSource = page.locator("#mobileSourceTabs .source-tab[data-source='huxiu']");
-  await expect(huxiuSource).toBeVisible();
-  await huxiuSource.click();
-  await expect(huxiuSource).toHaveClass(/active/);
-  await expect(page.locator("body")).toHaveAttribute("data-active-category", "community");
-  await expect(page.locator(".article[data-article-url='https://example.com/huxiu']")).toBeVisible();
+  const aiNewsSub = page.locator("#mobileSubTabs .sub-tab[data-sub='ai-news']");
+  await expect(aiNewsSub).toBeVisible();
+  await aiNewsSub.click();
+  await expect(page.locator("#mobileSubTabs .sub-tab[data-sub='ai-news']")).toHaveClass(/active/);
+  await expect(page.locator("#mobileSourceTabs")).toBeHidden();
+  await expect(page.locator("body")).toHaveAttribute("data-active-category", "tech");
+  await expect(page.locator(".article[data-article-url='https://example.com/qbitai']")).toBeVisible();
   await expect(page.locator(".article-meta, .article-legacy-score, .article-priority")).toHaveCount(0);
 
-  const sectionColor = await page.locator(".stream-section[data-panel='community']").evaluate(
+  const sectionColor = await page.locator(".stream-section[data-panel='tech']").evaluate(
     (element: unknown) => (globalThis as any).getComputedStyle(element).borderTopColor,
   );
   await expect.poll(() => page.locator("#mobileSubTabs .sub-tab.active").evaluate(
     (element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor,
   )).toBe(sectionColor);
-  await expect.poll(() => page.locator("#mobileSourceTabs .source-tab.active").evaluate(
-    (element: unknown) => (globalThis as any).getComputedStyle(element).borderColor,
-  )).toBe(sectionColor);
+});
+
+test("market and community columns are absent and community sources stay out of public output", async ({ page }) => {
+  const articles: ArticleInput[] = [
+    { sourceId: "github-trending", source: "GitHub Trending", title: "Visible technology", url: "https://example.com/visible-tech", category: "tech", summary: "技术摘要" },
+    { sourceId: "v2ex-hot", source: "V2EX", title: "Hidden community", url: "https://example.com/hidden-community", category: "tech", summary: "社区摘要" },
+  ];
+  const raw = groupRaw(articles, sources);
+  const personalized = selectPersonalizedArticles(articles, raw, ["Hidden community"]);
+  await page.setContent(renderHtml({ ...report, trading: { generated_at: "2026-07-10T00:00:00.000Z", tickers: [], watchlist: [], market_overview: "hidden", risk_caveat: "hidden" } }, raw, "2026-07-10", [], undefined, undefined, undefined, undefined, undefined, personalized));
+
+  await expect(page.locator(".tab[data-tab='trading'], [data-panel='trading']")).toHaveCount(0);
+  await expect(page.locator(".tab[data-tab='community'], [data-panel='community']")).toHaveCount(0);
+  await expect(page.locator(".article[data-article-url='https://example.com/hidden-community']")).toHaveCount(0);
+  expect(personalized).toHaveLength(0);
 });
 
 test("desktop sidebar keeps current subsection shortcuts visible and category-colored", async ({ page }) => {
