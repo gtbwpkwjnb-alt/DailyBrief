@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
-import { aiReview, consolidatedEnrich, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText, resolveReviewBlockingItems } from "../lib/ai/enrich";
+import { aiReview, consolidatedEnrich, createEnrichmentControl, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText, resolveReviewBlockingItems } from "../lib/ai/enrich";
 import { buildDailyReportFromEnriched, createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { filterRawArticles, groupRaw, safeExternalUrl, selectPersonalizedArticles, visibleArticlesFromRaw } from "../lib/output/render";
@@ -180,6 +180,124 @@ test("one consolidated AI call returns both the displayed summary and AI analysi
   assert.match(calls[0]!.userPrompt, /"aiAnalysis"/);
   assert.equal(result.get("https://example.com/visible")?.summary, "该产品公布了已在原文说明的新功能更新。");
   assert.equal(result.get("https://example.com/visible")?.aiAnalysis, "这可能降低目标用户的使用门槛，但实际价值仍取决于后续采用和稳定性。");
+});
+
+function consolidatedItem(url: string) {
+  return {
+    url,
+    displayTitle: `精炼标题 ${url}`,
+    summary: "原文提供了明确背景、事件进展和可核验的具体信息。",
+    aiAnalysis: "这一变化可能影响相关产品的采用路径，后续仍需结合实际数据判断。",
+    tags: ["技术"],
+    importance: 5,
+    coverageCountries: [],
+    interestMatches: [],
+  };
+}
+
+test("consolidated enrichment retries only missing URLs", async () => {
+  const urls = ["https://example.com/a", "https://example.com/b"];
+  const prompts: string[] = [];
+  const result = await consolidatedEnrich("技术动态", urls.map((url) => ({
+    url,
+    title: `Article ${url}`,
+    excerpt: "A concrete product update with enough source context for verification.",
+  })), {
+    run: async (request) => {
+      prompts.push(request.userPrompt);
+      const returned = prompts.length === 1 ? [urls[0]!] : [urls[1]!];
+      return { durationMs: 1, text: JSON.stringify({ items: returned.map(consolidatedItem) }) };
+    },
+  });
+
+  assert.equal(result.size, 2);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1]!, /https:\/\/example\.com\/b/);
+  assert.doesNotMatch(prompts[1]!, /https:\/\/example\.com\/a/);
+});
+
+test("consolidated enrichment opens a shared circuit after three empty responses", async () => {
+  const control = createEnrichmentControl({ budgetMs: 60_000, emptyFailureThreshold: 3 });
+  let calls = 0;
+  const run = async () => {
+    calls++;
+    return { durationMs: 1, text: calls % 2 === 0 ? '{"items":[' : "" };
+  };
+  const first = await consolidatedEnrich("技术动态", [{
+    url: "https://example.com/failing",
+    title: "Failing item",
+    excerpt: "A sufficiently detailed source excerpt that should be safe to process.",
+  }], { control, run });
+  const second = await consolidatedEnrich("财经要点", [{
+    url: "https://example.com/never-started",
+    title: "Never started",
+    excerpt: "Another sufficiently detailed excerpt that must not start after the circuit opens.",
+  }], { control, run });
+
+  assert.equal(first.size, 0);
+  assert.equal(second.size, 0);
+  assert.equal(calls, 3);
+  assert.equal(control.circuitOpen, true);
+  assert.equal(control.reason, "empty_response");
+  assert.equal(control.attemptsByUrl.get("https://example.com/failing"), 3);
+  assert.equal(control.attemptsByUrl.has("https://example.com/never-started"), false);
+});
+
+test("consolidated enrichment shares its deadline and shortens call timeout", async () => {
+  let clock = 1_000;
+  const control = createEnrichmentControl({ budgetMs: 12_345, perCallTimeoutMs: 60_000, now: () => clock });
+  const timeouts: Array<number | undefined> = [];
+  const result = await consolidatedEnrich("技术动态", [{
+    url: "https://example.com/deadline",
+    title: "Deadline item",
+    excerpt: "The source includes enough concrete context to produce an enrichment.",
+  }], {
+    control,
+    run: async (request) => {
+      timeouts.push(request.timeoutMs);
+      clock = control.deadlineAt;
+      return { durationMs: 1, text: JSON.stringify({ items: [consolidatedItem("https://example.com/deadline")] }) };
+    },
+  });
+  const afterDeadline = await consolidatedEnrich("财经要点", [{
+    url: "https://example.com/after-deadline",
+    title: "After deadline",
+    excerpt: "This request should never be sent because the shared budget is exhausted.",
+  }], { control, run: async () => { throw new Error("must not run"); } });
+
+  assert.equal(result.size, 1);
+  assert.deepEqual(timeouts, [12_345]);
+  assert.equal(afterDeadline.size, 0);
+  assert.equal(control.reason, "budget");
+});
+
+test("a valid response resets consecutive empty-response failures", async () => {
+  const control = createEnrichmentControl({ budgetMs: 60_000, emptyFailureThreshold: 3 });
+  const responses = [
+    "",
+    JSON.stringify({ items: [consolidatedItem("https://example.com/reset-a")] }),
+    "",
+    '{"items":',
+    JSON.stringify({ items: [consolidatedItem("https://example.com/reset-b")] }),
+  ];
+  let calls = 0;
+  const run = async () => ({ durationMs: 1, text: responses[calls++] ?? "" });
+  const first = await consolidatedEnrich("技术动态", [{
+    url: "https://example.com/reset-a",
+    title: "Reset A",
+    excerpt: "A detailed source excerpt for the first reset test item.",
+  }], { control, run });
+  const second = await consolidatedEnrich("财经要点", [{
+    url: "https://example.com/reset-b",
+    title: "Reset B",
+    excerpt: "A detailed source excerpt for the second reset test item.",
+  }], { control, run });
+
+  assert.equal(first.size, 1);
+  assert.equal(second.size, 1);
+  assert.equal(calls, 5);
+  assert.equal(control.consecutiveEmptyFailures, 0);
+  assert.equal(control.circuitOpen, false);
 });
 
 test("final web set never backfills an article that was outside the AI target set", () => {

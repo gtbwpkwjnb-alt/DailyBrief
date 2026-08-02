@@ -932,8 +932,54 @@ type ConsolidatedEnrichment = {
   interestMatches: string[];
 };
 
-type ConsolidatedEnrichOptions = {
+export type EnrichmentStopReason = "budget" | "empty_response";
+
+export type EnrichmentControl = {
+  deadlineAt: number;
+  perCallTimeoutMs: number;
+  emptyFailureThreshold: number;
+  maxAttemptsPerUrl: number;
+  consecutiveEmptyFailures: number;
+  attemptsByUrl: Map<string, number>;
+  circuitOpen: boolean;
+  reason?: EnrichmentStopReason;
+  now: () => number;
+};
+
+type EnrichmentControlOptions = {
+  budgetMs?: number;
+  perCallTimeoutMs?: number;
+  emptyFailureThreshold?: number;
+  maxAttemptsPerUrl?: number;
+  now?: () => number;
+};
+
+function positiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function createEnrichmentControl(options: EnrichmentControlOptions = {}): EnrichmentControl {
+  const now = options.now ?? Date.now;
+  const budgetMs = options.budgetMs
+    ?? positiveNumber(process.env.AI_ENRICH_BUDGET_MS, 7 * 60_000);
+  return {
+    deadlineAt: now() + budgetMs,
+    perCallTimeoutMs: options.perCallTimeoutMs
+      ?? positiveNumber(process.env.AI_ENRICH_CALL_TIMEOUT_MS, 60_000),
+    emptyFailureThreshold: options.emptyFailureThreshold
+      ?? positiveNumber(process.env.AI_ENRICH_EMPTY_FAILURES, 3),
+    maxAttemptsPerUrl: options.maxAttemptsPerUrl ?? 3,
+    consecutiveEmptyFailures: 0,
+    attemptsByUrl: new Map(),
+    circuitOpen: false,
+    now,
+  };
+}
+
+export type ConsolidatedEnrichOptions = {
   customKeywords?: string[];
+  control?: EnrichmentControl;
   /** Test seam; production uses the configured LLM dispatcher. */
   run?: typeof runLlm;
 };
@@ -972,12 +1018,16 @@ export async function consolidatedEnrich(
   options: ConsolidatedEnrichOptions = {},
 ): Promise<Map<string, ConsolidatedEnrichment>> {
   if (items.length === 0) return new Map();
+  const control = options.control ?? createEnrichmentControl();
+  const sharedOptions = { ...options, control };
+  if (!canStartEnrichment(control)) return new Map();
 
   const batchSize = 15;
   if (items.length > batchSize) {
     const batched = new Map<string, ConsolidatedEnrichment>();
     for (let i = 0; i < items.length; i += batchSize) {
-      const partial = await consolidatedEnrich(categoryLabel, items.slice(i, i + batchSize), options);
+      if (!canStartEnrichment(control)) break;
+      const partial = await consolidatedEnrich(categoryLabel, items.slice(i, i + batchSize), sharedOptions);
       for (const [url, value] of partial) batched.set(url, value);
     }
     return batched;
@@ -1013,56 +1063,56 @@ export async function consolidatedEnrich(
     `必须输出且仅输出 ${items.length} 条，url 精确回填。`,
   ].join("\n");
 
-  // Retry the full batch once, then recover missing URLs in smaller batches.
-  try {
-    merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel, run));
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[enrich] consolidated "${categoryLabel}" attempt 1 failed: ${msg} — retrying in 10s…`);
-  }
-
-  if (result.size === 0) {
-    await new Promise((r) => setTimeout(r, 10_000));
-    try {
-      merge(await runConsolidatedOnce(items, CONSOLIDATED_PROMPTS, userPrompt, categoryLabel, run));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`[enrich] consolidated "${categoryLabel}" attempt 2 also failed: ${msg}`);
-    }
-  }
-
-  const missing = items.filter((item) => needsConsolidatedRepair(item, result.get(item.url)));
-  for (let i = 0; i < missing.length; i += 10) {
-    const batch = missing.slice(i, i + 10);
-    const batchPrompt = buildConsolidatedPrompt(categoryLabel, batch, langHeader, options);
-    try {
-      merge(await runConsolidatedOnce(batch, CONSOLIDATED_PROMPTS, batchPrompt, `${categoryLabel}-recovery`, run));
-    } catch (e) {
-      console.warn(`[enrich] consolidated "${categoryLabel}" recovery batch failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  // A response can be valid JSON while still containing an untranslated or
-  // visibly garbled summary. Retry only those items up to three times; the
-  // caller can suppress the item after the bounded recovery budget is spent.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const malformed = items.filter((item) => needsConsolidatedRepair(item, result.get(item.url)));
-    if (malformed.length === 0) break;
+  // The first request plus at most two targeted repairs gives each URL a
+  // strict total budget of three attempts. Successful URLs are never replayed.
+  for (let attempt = 1; attempt <= control.maxAttemptsPerUrl; attempt++) {
+    const malformed = items.filter((item) =>
+      needsConsolidatedRepair(item, result.get(item.url))
+      && (control.attemptsByUrl.get(item.url) ?? 0) < control.maxAttemptsPerUrl,
+    );
+    if (malformed.length === 0 || !canStartEnrichment(control)) break;
+    const attemptItems = malformed;
     const repairPrompt = [
-      buildConsolidatedPrompt(categoryLabel, malformed, langHeader, options),
-      REPORT_LOCALE === "en"
-        ? "This is a repair attempt. Replace every missing, untranslated, garbled, or low-information field. A hot-search summary must explain the query, context, and evidence-backed cause; aiAnalysis must add a distinct implication."
-        : "这是定向修复尝试。请修复缺失、未翻译、乱码或低信息字段；热搜摘要必须解释词义、关联背景和有证据的走红原因，aiAnalysis 必须给出不重复摘要的影响判断。",
+      attempt === 1 ? userPrompt : buildConsolidatedPrompt(categoryLabel, attemptItems, langHeader, sharedOptions),
+      attempt === 1 ? "" : (REPORT_LOCALE === "en"
+        ? "This is a targeted repair. Replace every missing, untranslated, garbled, or low-information field. A hot-search summary must explain the query, context, and evidence-backed cause; aiAnalysis must add a distinct implication."
+        : "这是定向修复。请修复缺失、未翻译、乱码或低信息字段；热搜摘要必须解释词义、关联背景和有证据的走红原因，aiAnalysis 必须给出不重复摘要的影响判断。"),
     ].join("\n\n");
     try {
-      merge(await runConsolidatedOnce(malformed, CONSOLIDATED_PROMPTS, repairPrompt, `${categoryLabel}-garbled-repair-${attempt}`, run));
-      console.log(`[enrich] consolidated "${categoryLabel}" garbled repair ${attempt}/3: ${malformed.length} item(s)`);
+      merge(await runConsolidatedOnce(
+        attemptItems,
+        CONSOLIDATED_PROMPTS,
+        repairPrompt,
+        attempt === 1 ? categoryLabel : `${categoryLabel}-repair-${attempt}`,
+        run,
+        control,
+      ));
+      if (attempt > 1) console.log(`[enrich] consolidated "${categoryLabel}" targeted repair ${attempt}/${control.maxAttemptsPerUrl}: ${attemptItems.length} item(s)`);
     } catch (e) {
-      console.warn(`[enrich] consolidated "${categoryLabel}" garbled repair ${attempt}/3 failed: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`[enrich] consolidated "${categoryLabel}" attempt ${attempt}/${control.maxAttemptsPerUrl} failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
+  for (const item of items) {
+    if (needsConsolidatedRepair(item, result.get(item.url))) result.delete(item.url);
+  }
   return result;
+}
+
+function canStartEnrichment(control: EnrichmentControl): boolean {
+  if (control.circuitOpen) return false;
+  if (control.now() < control.deadlineAt) return true;
+  control.circuitOpen = true;
+  control.reason = "budget";
+  return false;
+}
+
+function recordUnusableResponse(control: EnrichmentControl): void {
+  control.consecutiveEmptyFailures++;
+  if (control.consecutiveEmptyFailures >= control.emptyFailureThreshold) {
+    control.circuitOpen = true;
+    control.reason = "empty_response";
+  }
 }
 
 function buildConsolidatedPrompt(categoryLabel: string, items: EnrichInput[], langHeader: string, options: ConsolidatedEnrichOptions = {}): string {
@@ -1095,23 +1145,50 @@ async function runConsolidatedOnce(
   userPrompt: string,
   scope: string,
   run: typeof runLlm,
+  control: EnrichmentControl,
 ): Promise<Map<string, ConsolidatedEnrichment>> {
   const result = new Map<string, ConsolidatedEnrichment>();
+  if (!canStartEnrichment(control)) return result;
+  const remainingBudget = control.deadlineAt - control.now();
+  const timeoutMs = Math.max(1, Math.min(control.perCallTimeoutMs, remainingBudget));
+  for (const item of items) {
+    control.attemptsByUrl.set(item.url, (control.attemptsByUrl.get(item.url) ?? 0) + 1);
+  }
 
-  const { text } = await run({
-    systemPrompt,
-    userPrompt,
-    timeoutMs: 120_000, // 2 min for large batches
-  });
+  let text: string;
+  try {
+    ({ text } = await run({ systemPrompt, userPrompt, timeoutMs }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/LLM_EMPTY_RESPONSE|LLM_TRUNCATED_JSON|LLM_EMPTY_RESULT/.test(message)) {
+      recordUnusableResponse(control);
+    }
+    throw error;
+  }
+  if (!text.trim()) {
+    recordUnusableResponse(control);
+    throw new Error("LLM_EMPTY_RESPONSE: enrichment provider returned empty content");
+  }
   const cleaned = extractJson(text);
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned) as unknown;
   } catch {
-    parsed = JSON.parse(jsonrepair(cleaned)) as unknown;
+    try {
+      parsed = JSON.parse(jsonrepair(cleaned)) as unknown;
+    } catch (error) {
+      recordUnusableResponse(control);
+      throw new Error(`LLM_TRUNCATED_JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
-  const validated = parseConsolidatedResult(parsed, items.map((item) => item.url));
+  let validated: ReturnType<typeof parseConsolidatedResult>;
+  try {
+    validated = parseConsolidatedResult(parsed, items.map((item) => item.url));
+  } catch (error) {
+    recordUnusableResponse(control);
+    throw new Error(`LLM_INVALID_RESPONSE: ${error instanceof Error ? error.message : String(error)}`);
+  }
   for (const [url, value] of validated) {
     const item = items.find((candidate) => candidate.url === url);
     const unsupported = item ? hasUnsupportedHighRiskClaim(item, value) : null;
@@ -1122,6 +1199,11 @@ async function runConsolidatedOnce(
     }
     result.set(url, value);
   }
+  if (result.size === 0) {
+    recordUnusableResponse(control);
+    throw new Error("LLM_EMPTY_RESULT: enrichment response contained no usable requested items");
+  }
+  control.consecutiveEmptyFailures = 0;
 
   // Diagnostic for undercount
   if (result.size < items.length / 2 && items.length >= 3) {
