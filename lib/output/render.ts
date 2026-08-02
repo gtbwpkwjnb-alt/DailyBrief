@@ -26,6 +26,11 @@ import {
   preserveTrendQuery,
   politicsAttribution,
 } from "../editorial/context";
+import {
+  selectPublicArticles,
+  type PublicSelectionOptions,
+  type PublicSelectionResult,
+} from "../editorial/public-selection";
 import type { TickerAnalysis } from "../trading/signals";
 import {
   getAssetGroupLabels,
@@ -94,6 +99,7 @@ const TEXTS_ZH = {
   uncertainties: "不确定性",
   sourceList: "来源",
   aiRefined: "AI 辅助精炼",
+  sourceExcerpt: "来源原文摘录",
   revision: "修订",
   evidenceMulti: "多源确认",
   evidenceSingle: "单一具名来源",
@@ -173,6 +179,7 @@ const TEXTS_EN: typeof TEXTS_ZH = {
   uncertainties: "Uncertainties",
   sourceList: "Sources",
   aiRefined: "AI-assisted refinement",
+  sourceExcerpt: "Source excerpt",
   revision: "Revision",
   evidenceMulti: "Multi-source confirmed",
   evidenceSingle: "Single named source",
@@ -263,6 +270,12 @@ export type RunStats = {
   sourceSuccessRate: number;
   fetchedArticles: number;
   dedupedArticles: number;
+  publicSelectionEligible?: number;
+  publicSelectionLowInformationFiltered?: number;
+  publicSelectionQualityFiltered?: number;
+  publicSelectionEventMerged?: number;
+  publicSelectionAdaptiveTarget?: number;
+  publicSelectionExpansionArticles?: number;
   displayedArticles?: number;
   personalizedArticles?: number;
   aiEnrichedArticles?: number;
@@ -437,10 +450,50 @@ function mergedLimitFor(
 
 // ----- grouping -----
 
+type GroupRawOptions = {
+  customKeywords?: string[];
+  publicSelection?: PublicSelectionOptions;
+  skipPublicSelection?: boolean;
+};
+
+function publicEligibleArticles(
+  articles: ArticleInput[],
+  registry: SourceDef[],
+): ArticleInput[] {
+  const enabledIds = new Set(registry.filter((source) => source.enabled !== false).map((source) => source.id));
+  const subcategoryBySource = new Map(registry.map((source) => [source.id, source.subcategory]));
+  return articles
+    .filter((article) => enabledIds.has(article.sourceId))
+    .filter((article) => !PUBLIC_EXCLUDED_SUBCATEGORIES.has(subcategoryBySource.get(article.sourceId) ?? ""))
+    .filter((article) => article.category !== "politics" || !isSportsArticle(article.title))
+    .filter((article) => !(
+      (article.sourceId === "v2ex-hot" || article.sourceId === "linuxdo")
+      && V2EX_OFF_TOPIC_RE.test(article.title)
+    ));
+}
+
+export function selectPublicArticlesForDisplay(
+  articles: ArticleInput[],
+  registry: SourceDef[],
+  options: PublicSelectionOptions = {},
+): PublicSelectionResult {
+  const eligible = publicEligibleArticles(articles, registry);
+  const result = selectPublicArticles(eligible, registry, options);
+  const policyFiltered = articles.length - eligible.length;
+  return {
+    ...result,
+    stats: {
+      ...result.stats,
+      input: articles.length,
+      hardFiltered: result.stats.hardFiltered + policyFiltered,
+    },
+  };
+}
+
 export function groupRaw(
   articles: ArticleInput[],
   registry: SourceDef[],
-  _options: { customKeywords?: string[] } = {},
+  options: GroupRawOptions = {},
 ): RawByCategory {
   const subcatOf = new Map<string, string | undefined>();
   for (const s of registry) subcatOf.set(s.id, s.subcategory);
@@ -471,7 +524,11 @@ export function groupRaw(
     }
   }
 
-  for (const a of articles) {
+  const selectedArticles = options.skipPublicSelection
+    ? publicEligibleArticles(articles, registry)
+    : selectPublicArticlesForDisplay(articles, registry, options.publicSelection).articles;
+
+  for (const a of selectedArticles) {
     if (!enabledIds.has(a.sourceId)) continue;
     if (PUBLIC_EXCLUDED_SUBCATEGORIES.has(subcatOf.get(a.sourceId) ?? "")) continue;
     if (a.category === "politics" && isSportsArticle(a.title)) continue;
@@ -598,7 +655,7 @@ export function selectPersonalizedArticles(
   eligibleArticles: ArticleInput[],
   publicRaw: RawByCategory,
   customKeywords: string[],
-  limit = 24,
+  limit = 10,
 ): ArticleInput[] {
   const keywords = normalizeCustomKeywords(customKeywords);
   if (keywords.length === 0 || limit <= 0) return [];
@@ -732,8 +789,13 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
     a.summary ?? (a as unknown as { cnSummary?: string }).cnSummary,
     REPORT_LOCALE,
   );
-  const summary = summaryText ? escapeHtml(summaryText) : "";
-  const aiAnalysis = a.aiAnalysis ? escapeHtml(a.aiAnalysis) : "";
+  const sourceOnly = /AI 分析暂不可用|AI analysis is unavailable/i.test(a.aiAnalysis ?? "")
+    || (a.tags ?? []).some((tag) => /^(?:信息有限|Information limited)$/i.test(tag));
+  const displaySummaryText = sourceOnly
+    ? summaryText.replace(/^(?:信息有限\s*[：:]\s*仅展示来源原文摘录。?|Information limited\s*:\s*source excerpt only\.?)\s*/i, "")
+    : summaryText;
+  const summary = displaySummaryText ? escapeHtml(displaySummaryText) : "";
+  const aiAnalysis = a.aiAnalysis && !sourceOnly ? escapeHtml(a.aiAnalysis) : "";
   const stats = a.meta ? escapeHtml(a.meta) : "";
   const sourceDef = sources.find((source) => source.id === a.sourceId);
   const sourceCountry = a.sourceCountry ?? sourceDef?.originCountry;
@@ -786,7 +848,7 @@ function renderArticleHtml(a: ArticleInput, showSource = false): string {
     ${showTitle ? `<h3 class="article-title">${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : title}</h3>${trendQueryHtml}` : ""}
     ${attributionHtml}
     ${stats ? `<p class="article-stats">${stats}</p>` : ""}
-    ${summary ? `<p class="article-summary">${summaryLabel ? `<span class="summary-label">${summaryLabel} · ${STR.aiRefined}</span> ` : ""}${summary}</p>` : ""}
+    ${summary ? `<p class="article-summary"><span class="summary-label">${sourceOnly ? STR.sourceExcerpt : `${summaryLabel} · ${STR.aiRefined}`}</span> ${summary}</p>` : ""}
     ${aiAnalysis ? `<p class="article-analysis"><span>${REPORT_LOCALE === "en" ? "AI analysis" : "AI 评价"}</span>${aiAnalysis}</p>` : ""}
     ${publicContext}
     ${tags || interestMatches.length > 0 ? `<p class="article-tags">${visibleTags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}${hiddenTagCount > 0 ? `<span class="tag tag-more">+${hiddenTagCount}</span>` : ""}${interestMatches.slice(0, 1).map((keyword) => `<span class="tag interest-tag">兴趣：${escapeHtml(keyword)}</span>`).join("")}</p>` : ""}
@@ -963,8 +1025,8 @@ function renderTagCloud(tags: TagEntry[]): string {
 function renderCategorySummary(key: string, summaries?: Record<string, string>): string {
   const text = summaries?.[key];
   if (!text) return "";
-  const label = REPORT_LOCALE === "en" ? "AI Summary" : "📋 AI 分析";
-  return `<details class="category-summary">
+  const label = REPORT_LOCALE === "en" ? "AI section brief" : "AI 栏目速览";
+  return `<details class="category-summary" open>
     <summary><span class="category-summary-eyebrow">${label}</span><span>${REPORT_LOCALE === "en" ? "Expand" : "展开"}</span></summary>
     <p>${escapeHtml(text)}</p>
   </details>`;
@@ -1100,6 +1162,19 @@ export function renderHtml(
       ? (REPORT_LOCALE === "en" ? "; empty-response circuit opened" : " · 空响应熔断")
       : "";
   const freshnessRejectedCount = Math.max(0, dedupedArticleCount - eligibleArticleCount);
+  const valueEligibleCount = runStats?.publicSelectionEligible;
+  const lowInformationFilteredCount = runStats?.publicSelectionLowInformationFiltered ?? 0;
+  const qualityFilteredCount = runStats?.publicSelectionQualityFiltered ?? 0;
+  const eventMergedCount = runStats?.publicSelectionEventMerged ?? 0;
+  const adaptiveTargetCount = runStats?.publicSelectionAdaptiveTarget;
+  const expansionArticleCount = runStats?.publicSelectionExpansionArticles ?? 0;
+  const selectionDetail = valueEligibleCount === undefined
+    ? (REPORT_LOCALE === "en"
+      ? `Deduped ${dedupedArticleCount}; freshness rejected ${freshnessRejectedCount}`
+      : `去重后 ${dedupedArticleCount} 条 · 时效筛除 ${freshnessRejectedCount} 条`)
+    : (REPORT_LOCALE === "en"
+      ? `Value-qualified ${valueEligibleCount}; low-information filtered ${lowInformationFilteredCount}; quality-gate filtered ${qualityFilteredCount}; near-duplicate events merged ${eventMergedCount}; adaptive plan ${adaptiveTargetCount ?? publicDisplayedArticleCount}, actual public selection ${publicDisplayedArticleCount}${expansionArticleCount ? ` including ${expansionArticleCount} high-value expansions` : ""}`
+      : `价值规则合格 ${valueEligibleCount} 条 · 低信息筛除 ${lowInformationFilteredCount} 条 · 质量门槛筛除 ${qualityFilteredCount} 条 · 近似事件合并 ${eventMergedCount} 条 · 自适应计划目标 ${adaptiveTargetCount ?? publicDisplayedArticleCount} 条，实际公共精选 ${publicDisplayedArticleCount} 条${expansionArticleCount ? `（高价值事件扩容 ${expansionArticleCount} 条）` : ""}`);
   const sourceSuccessDetail = runStats
     ? `${runStats.successfulSources}/${runStats.fetchedSources} · ${(runStats.sourceSuccessRate * 100).toFixed(1)}%`
     : (REPORT_LOCALE === "en" ? "Not recorded" : "未记录");
@@ -1108,7 +1183,7 @@ export function renderHtml(
     <p>${escapeHtml(qualitySummary)}</p>
     <dl class="quality-pipeline">
       <div class="quality-stage"><span class="quality-stage-index">1</span><div><dt>${REPORT_LOCALE === "en" ? "Fetched" : "抓取入库"}</dt><dd>${fetchedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? "Sources succeeded" : "来源成功"} ${sourceSuccessDetail}</p></div></div>
-      <div class="quality-stage"><span class="quality-stage-index">2</span><div><dt>${REPORT_LOCALE === "en" ? "Eligible pool" : "初筛候选"}</dt><dd>${eligibleArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Deduped ${dedupedArticleCount}; freshness rejected ${freshnessRejectedCount}` : `去重后 ${dedupedArticleCount} 条 · 时效筛除 ${freshnessRejectedCount} 条`}</p></div></div>
+      <div class="quality-stage"><span class="quality-stage-index">2</span><div><dt>${REPORT_LOCALE === "en" ? "Eligible pool" : "初筛候选"}</dt><dd>${eligibleArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${selectionDetail}</p></div></div>
       <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Public ${publicDisplayedArticleCount} + personalized incremental ${personalizedArticleCount}; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${sourceFallbackArticleCount ? `; source-only fallback ${sourceFallbackArticleCount}` : ""}${suppressedArticleCount ? `; suppressed ${suppressedArticleCount}` : ""}${enrichmentStopText}` : `公共精选 ${publicDisplayedArticleCount} 条 + 个性化增量 ${personalizedArticleCount} 条 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${sourceFallbackArticleCount ? ` · 来源原文降级 ${sourceFallbackArticleCount} 条` : ""}${suppressedArticleCount ? ` · 已屏蔽 ${suppressedArticleCount} 条` : ""}${enrichmentStopText}`}</p></div></div>
     </dl>
     <p class="quality-scope-note">${REPORT_LOCALE === "en" ? "AI enrichment applies to displayed items. The publication quality review is a category sample, not full factual verification." : "AI 逐条精炼只覆盖前端精选内容；发布前质量审核为分栏抽检，不代表对全部候选逐条事实核验。"}</p>

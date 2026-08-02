@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
-import { aiReview, consolidatedEnrich, createEnrichmentControl, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText, resolveReviewBlockingItems } from "../lib/ai/enrich";
+import { aiReview, consolidatedEnrich, createEnrichmentControl, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText, planEnrichmentBatches, resolveReviewBlockingItems } from "../lib/ai/enrich";
 import { buildDailyReportFromEnriched, canPublishLimitedCircuitEdition, createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { filterRawArticles, groupRaw, safeExternalUrl, selectPersonalizedArticles, visibleArticlesFromRaw } from "../lib/output/render";
@@ -27,10 +27,12 @@ test("personalized selection adds eligible keyword matches without changing publ
     title: index === 15 ? "Special robotics project" : `General project ${index}`,
     url: `https://example.com/project-${index}`,
     category: "tech" as const,
-    publishedAt: new Date(Date.UTC(2026, 6, 28, 0, 16 - index)),
+    excerpt: "A concrete software project update with implementation details and a documented release.",
+    publishedAt: new Date(Date.UTC(2026, 7, 2, 0, 16 - index)),
   }));
-  const publicWithoutKeywords = groupRaw(candidates, registry);
-  const publicWithKeywords = groupRaw(candidates, registry, { customKeywords: ["robotics"] });
+  const publicSelection = { referenceTime: new Date("2026-08-02T08:00:00Z") };
+  const publicWithoutKeywords = groupRaw(candidates, registry, { publicSelection });
+  const publicWithKeywords = groupRaw(candidates, registry, { customKeywords: ["robotics"], publicSelection });
   assert.deepEqual(
     visibleArticlesFromRaw(publicWithKeywords).map((article) => article.url),
     visibleArticlesFromRaw(publicWithoutKeywords).map((article) => article.url),
@@ -182,6 +184,16 @@ test("one consolidated AI call returns both the displayed summary and AI analysi
   assert.equal(result.get("https://example.com/visible")?.aiAnalysis, "这可能降低目标用户的使用门槛，但实际价值仍取决于后续采用和稳定性。");
 });
 
+test("AI enrichment batches adapt to item count and prompt size", () => {
+  const items = Array.from({ length: 7 }, (_, index) => ({
+    url: `https://example.com/batch-${index}`,
+    title: `Batch item ${index}`,
+    excerpt: index === 3 ? "x".repeat(250) : "short context",
+  }));
+  assert.deepEqual(planEnrichmentBatches(items, { maxItems: 4, maxChars: 10_000 }).map((batch) => batch.length), [4, 3]);
+  assert.deepEqual(planEnrichmentBatches(items, { maxItems: 12, maxChars: 500 }).map((batch) => batch.length), [3, 1, 3]);
+});
+
 function consolidatedItem(url: string) {
   return {
     url,
@@ -301,23 +313,34 @@ test("a valid response resets consecutive empty-response failures", async () => 
 });
 
 test("final web set never backfills an article that was outside the AI target set", () => {
+  const sourceIds = ["github-trending", "qbitai", "openai-news"];
+  const topics = ["compiler", "database", "robotics", "browser", "security", "storage", "network", "runtime", "kernel", "graphics", "testing", "observability", "payments", "search", "messaging"];
   const candidates = Array.from({ length: 15 }, (_, index) => ({
-    sourceId: "github-trending",
-    source: "GitHub Trending",
-    title: `Project ${index + 1}`,
+    sourceId: sourceIds[index % sourceIds.length]!,
+    source: sourceIds[index % sourceIds.length]!,
+    title: `${topics[index]} engineering release ${index + 1}`,
     url: `https://example.com/project-${index + 1}`,
     category: "tech" as const,
+    excerpt: `Project ${index + 1} publishes a concrete engineering release with implementation details.`,
+    publishedAt: new Date("2026-08-02T06:00:00Z"),
+    importance: 2,
   }));
-  const initiallyVisible = groupRaw(candidates, sources);
+  const initiallyVisible = groupRaw(candidates, sources, {
+    publicSelection: {
+      categoryTargets: { tech: 4 },
+      referenceTime: new Date("2026-08-02T08:00:00Z"),
+    },
+  });
   const aiTargets = visibleArticlesFromRaw(initiallyVisible);
-  assert.equal(aiTargets.length, 14);
-  assert.equal(aiTargets.some((article) => article.url.endsWith("project-15")), false);
+  assert.equal(aiTargets.length, 4);
+  const outsideTarget = candidates.find((article) => !aiTargets.includes(article));
+  assert.ok(outsideTarget);
 
   const finalRaw = filterRawArticles(initiallyVisible, (article) => article !== aiTargets[0]);
   const finalVisible = visibleArticlesFromRaw(finalRaw);
-  assert.equal(finalVisible.length, 13);
+  assert.equal(finalVisible.length, 3);
   assert.equal(finalVisible.every((article) => aiTargets.includes(article)), true);
-  assert.equal(finalVisible.some((article) => article.url.endsWith("project-15")), false);
+  assert.equal(finalVisible.some((article) => article.url === outsideTarget.url), false);
 });
 
 test("digest metadata is derived only from the enriched web-visible articles", () => {
@@ -448,6 +471,12 @@ test("report sidecar validates data and restores publication timestamps", () => 
       fetchedArticles: 3,
       dedupedArticles: 2,
       freshArticles: 1,
+      publicSelectionEligible: 1,
+      publicSelectionLowInformationFiltered: 1,
+      publicSelectionQualityFiltered: 0,
+      publicSelectionEventMerged: 0,
+      publicSelectionAdaptiveTarget: 1,
+      publicSelectionExpansionArticles: 0,
       displayedArticles: 1,
       aiEnrichedArticles: 1,
       enrichmentVersion: 2,
@@ -464,6 +493,9 @@ test("report sidecar validates data and restores publication timestamps", () => 
   assert.equal(sidecar.qualityReview?.passed, true);
   assert.equal(sidecar.qualityReview?.summary, "Quality gates passed.");
   assert.equal(sidecar.runStats?.displayedArticles, 1);
+  assert.equal(sidecar.runStats?.publicSelectionEligible, 1);
+  assert.equal(sidecar.runStats?.publicSelectionLowInformationFiltered, 1);
+  assert.equal(sidecar.runStats?.publicSelectionAdaptiveTarget, 1);
   assert.equal(sidecar.runStats?.aiEnrichedArticles, 1);
   assert.equal(sidecar.runStats?.enrichmentVersion, 2);
   assert.throws(() => parseReportSidecar({ date: "invalid", articles: [] }));

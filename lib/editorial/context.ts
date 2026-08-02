@@ -5,10 +5,10 @@ export const MAX_CUSTOM_KEYWORD_LENGTH = 24;
 export const MAX_CUSTOM_KEYWORD_TOTAL = 120;
 
 export const BASE_FILTER_RULES_ZH =
-  "对已启用信息源的抓取结果按 URL 和规范化标题去重；仅保留 72 小时内内容及实时榜单；剔除已禁用来源、国际时政中的体育内容和社区离题内容；再按栏目配额、来源均衡、源内热度或发布时间选入公共日报。AI 只对选入条目做标题、摘要、标签和编辑重要度精炼，不参与本轮候选价值筛选。";
+  "对已启用信息源的抓取结果按 URL 和规范化标题去重；仅保留 72 小时内内容及实时榜单；剔除已禁用来源、低信息内容、国际时政中的体育内容和社区离题内容；再按质量门槛、近似事件合并、来源均衡和各栏目自适应阅读预算选入公共日报。总量不设固定硬上限，高价值事件密集时允许受控扩容，低价值内容不会为填满数量而进入。AI 只对最终选入的公共条目和个性化增量条目一次性完成标题、摘要、标签、重要度和影响分析，不重复调用。";
 
 export const BASE_FILTER_RULES_EN =
-  "Deduplicate enabled-source results by URL and normalized title; keep items from the last 72 hours plus live rankings; exclude disabled sources, sports from world news, and off-topic community posts; then select the public brief by section quotas, source balance, source ranking, or publication time. AI refines titles, summaries, tags, and editorial importance only after selection; it does not perform candidate value selection in this run.";
+  "Deduplicate enabled-source results by URL and normalized title; keep items from the last 72 hours plus live rankings; exclude disabled sources, low-information items, sports from world news, and off-topic community posts; then select the public brief using a quality gate, near-event merging, source balance, and adaptive section reading budgets. There is no fixed global hard cap: dense high-value news may expand a section, while low-value items never fill a quota. AI makes one combined pass over only the final public selection and personalized additions for titles, summaries, tags, importance, and impact analysis.";
 
 export function isGoogleTrendsArticle(sourceId: string): boolean {
   return sourceId.startsWith("google-trends-");

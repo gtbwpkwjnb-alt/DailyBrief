@@ -42,6 +42,7 @@ import {
   renderHtml,
   renderMarkdown,
   selectPersonalizedArticles,
+  selectPublicArticlesForDisplay,
   visibleArticlesFromRaw,
 } from "../lib/output/render";
 import { parseReportSidecar } from "../lib/output/sidecar";
@@ -56,12 +57,13 @@ import {
   preserveTrendQuery,
 } from "../lib/editorial/context";
 import { loadReaderKeywords } from "../lib/editorial/preferences";
+import { buildCategoryDigests } from "../lib/editorial/category-digest";
 import { todayKey } from "../lib/utils";
 
 const OUTPUT_DIR = "daily_reports";
 const CACHE_DIR = ".cache";
 const LOG_DIR = "logs";
-const AI_ENRICHMENT_VERSION = 3;
+const AI_ENRICHMENT_VERSION = 4;
 
 type FailedSource = { id: string; name: string; reason: string };
 
@@ -168,9 +170,11 @@ function needsArticleEnrichmentRepair(article: ArticleInput): boolean {
 
 function canUseSourceOnlyFallback(article: ArticleInput): boolean {
   if (article.category === "politics" || isHotSearchArticle(article.sourceId)) return false;
+  if (article.sourceId === "reddit-popular") return false;
   if (hasHighRiskReviewContent(article)) return false;
   const sourceText = `${article.title} ${article.excerpt ?? ""}`.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   if (sourceText.length < 16) return false;
+  if (/submitted by \/u\/|\[link\]\s*\[comments?\]|\[link\]\s*\[留言\]/i.test(sourceText)) return false;
   return !/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]|(?:\?{4,})/.test(sourceText);
 }
 
@@ -896,7 +900,8 @@ async function main() {
   ];
   // Public selection is stable and never reordered by a user's keywords.
   // Personalized additions are selected separately from the eligible pool.
-  const visibleRaw = groupRaw(articles, sources);
+  const publicSelection = selectPublicArticlesForDisplay(articles, sources);
+  const visibleRaw = groupRaw(publicSelection.articles, sources, { skipPublicSelection: true });
   let personalizedArticles = selectPersonalizedArticles(articles, visibleRaw, customKeywords);
   const visibleByCategory = new Map<string, ArticleInput[]>();
   const suppressedSummaryIssues: string[] = [];
@@ -912,6 +917,12 @@ async function main() {
     sourceSuccessRate,
     fetchedArticles: fetchedArticleCount,
     dedupedArticles: dedupedArticleCount,
+    publicSelectionEligible: publicSelection.stats.eligible,
+    publicSelectionLowInformationFiltered: publicSelection.stats.lowInformationFiltered,
+    publicSelectionQualityFiltered: publicSelection.stats.qualityFiltered,
+    publicSelectionEventMerged: publicSelection.stats.eventMerged,
+    publicSelectionAdaptiveTarget: publicSelection.stats.adaptiveTarget,
+    publicSelectionExpansionArticles: publicSelection.stats.expansionArticles,
     ...freshness.stats,
     generatedAt: new Date().toISOString(),
     mode: cachedRun ? "reuse" : "fresh",
@@ -1025,6 +1036,20 @@ async function main() {
   runStats.suppressedArticles = suppressedUrls.size;
   let raw = filterRawArticles(visibleRaw, (article) => !suppressedUrls.has(article.url));
   personalizedArticles = personalizedArticles.filter((article) => !suppressedUrls.has(article.url));
+  if (sourceFallbackArticles > 0 && enrichmentControl.reason) {
+    const limitedSelection = selectPublicArticlesForDisplay(
+      visibleArticlesFromRaw(raw),
+      sources,
+      {
+        categoryTargets: { trending: 4, tech: 12, politics: 6, finance: 6 },
+      },
+    );
+    raw = groupRaw(limitedSelection.articles, sources, { skipPublicSelection: true });
+    const limitedVisible = [...visibleArticlesFromRaw(raw), ...personalizedArticles];
+    for (const cfg of CATEGORY_CONFIG) {
+      visibleByCategory.set(cfg.key, limitedVisible.filter((article) => article.category === cfg.key));
+    }
+  }
   let displayedArticles = visibleArticlesFromRaw(raw);
   runStats.displayedArticles = displayedArticles.length + personalizedArticles.length;
   runStats.personalizedArticles = personalizedArticles.length;
@@ -1059,17 +1084,10 @@ async function main() {
   const SUMMARY_CONFIG = CATEGORY_CONFIG;
   const refreshCategorySummaries = (): void => {
     for (const key of Object.keys(catSummaries)) delete catSummaries[key];
-    for (const cfg of SUMMARY_CONFIG) {
-      const items = displayedArticles
-        .filter((a) => cfg.filter(a) && !!a.summary)
-        .sort((a, b) => (b.importance ?? 5) - (a.importance ?? 5))
-        .slice(0, 3);
-      if (items.length === 0) continue;
-      catSummaries[cfg.key] = items
-        .map((article) => `${article.displayTitle ?? article.title}：${article.summary}`)
-        .join("；")
-        .slice(0, 320);
-    }
+    Object.assign(catSummaries, buildCategoryDigests(
+      displayedArticles,
+      REPORT_LOCALE === "en" ? "en" : "zh",
+    ));
   };
   refreshCategorySummaries();
   const catMatched = SUMMARY_CONFIG.filter((c) => catSummaries[c.key]).length;
@@ -1166,15 +1184,22 @@ async function main() {
     review.issues.push("本期未完成独立 AI 抽检，已在质量分析中标记精炼中断原因和降级范围。");
     review.suggestions.push("请在 AI 服务恢复后重新生成正式日报，补做独立质量抽检。");
   } else if (review.reviewState === "unavailable" && !highRiskReviewContent) {
-    const safeArticles = createReviewUnavailableFallbackArticles(reviewedArticles);
+    const safeArticles = createReviewUnavailableFallbackArticles(reviewedArticles.filter(canUseSourceOnlyFallback));
     const publicUrls = new Set(visibleArticlesFromRaw(raw).map((article) => article.url));
     const personalizedUrls = new Set(personalizedArticles.map((article) => article.url));
-    const safePublicArticles = safeArticles.filter((article) => publicUrls.has(article.url));
+    const safePublicSelection = selectPublicArticlesForDisplay(
+      safeArticles.filter((article) => publicUrls.has(article.url)),
+      sources,
+      {
+        categoryTargets: { trending: 4, tech: 12, politics: 0, finance: 6 },
+      },
+    );
+    const safePublicArticles = safePublicSelection.articles;
     report = createReviewUnavailableFallback(safePublicArticles);
-    raw = groupRaw(safePublicArticles, sources);
-    personalizedArticles = safeArticles.filter((article) => personalizedUrls.has(article.url));
+    raw = groupRaw(safePublicArticles, sources, { skipPublicSelection: true });
+    personalizedArticles = safeArticles.filter((article) => personalizedUrls.has(article.url)).slice(0, 10);
     for (const key of Object.keys(catSummaries)) delete catSummaries[key];
-    runStats.sourceFallbackArticles = safeArticles.length;
+    runStats.sourceFallbackArticles = safePublicArticles.length + personalizedArticles.length;
     runStats.aiEnrichedArticles = 0;
     review.publicationState = "limited";
     review.summary = "审核服务不可用；已发布仅含来源原文标题和摘录的信息有限版本。";

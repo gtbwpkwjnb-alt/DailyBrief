@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { groupRaw, renderHtml, selectPersonalizedArticles } from "../lib/output/render";
 import { sources } from "../lib/sources/registry";
 import type { ArticleInput, DailyReport } from "../lib/ai/pipeline";
+import { buildCategoryDigests } from "../lib/editorial/category-digest";
 
 const report: DailyReport = {
   hero_headline: "Test headline",
@@ -110,6 +111,12 @@ test("public review output exposes target evidence fields without operator contr
       sourceSuccessRate: 11 / 12,
       fetchedArticles: 120,
       dedupedArticles: 96,
+      publicSelectionEligible: 70,
+      publicSelectionLowInformationFiltered: 8,
+      publicSelectionQualityFiltered: 4,
+      publicSelectionEventMerged: 5,
+      publicSelectionAdaptiveTarget: 3,
+      publicSelectionExpansionArticles: 1,
       displayedArticles: 3,
       aiEnrichedArticles: 1,
       sourceFallbackArticles: 1,
@@ -163,6 +170,12 @@ test("public review output exposes target evidence fields without operator contr
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("120 条");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("初筛候选");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("82 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("价值规则合格 70 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("低信息筛除 8 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("质量门槛筛除 4 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("近似事件合并 5 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("自适应计划目标 3 条，实际公共精选 3 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("高价值事件扩容 1 条");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("前端精选");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("AI 精炼 1/3");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("来源原文降级 1 条");
@@ -171,11 +184,72 @@ test("public review output exposes target evidence fields without operator contr
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("抽检通过");
   await expect(page.locator("[data-testid='reader-tools']")).toContainText("公共日报");
   await expect(page.locator("[data-testid='reader-tools']")).toContainText("按 URL 和规范化标题去重");
-  await expect(page.locator("[data-testid='reader-tools']")).toContainText("栏目配额、来源均衡");
-  await expect(page.locator("[data-testid='reader-tools']")).toContainText("AI 只对选入条目");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("自适应阅读预算");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("总量不设固定硬上限");
+  await expect(page.locator("[data-testid='reader-tools']")).toContainText("AI 只对最终选入的公共条目和个性化增量条目一次性完成");
   await expect(page.locator("[data-testid='reader-tools']")).toContainText("用户个性化");
   await expect(page.locator("#readerKeywordsInput")).toHaveValue("AI Agent");
   expect(pageErrors).toEqual([]);
+});
+
+test("AI section briefs exclude source-only fallback cards", async ({ page }) => {
+  const enriched: ArticleInput = {
+    sourceId: "openai-news",
+    source: "OpenAI News",
+    title: "Model deployment update",
+    displayTitle: "模型部署能力更新",
+    url: "https://example.com/enriched",
+    category: "tech",
+    excerpt: "The release documents a concrete model deployment update.",
+    summary: "新版本更新了模型部署能力，并公布了具体适用范围。",
+    aiAnalysis: "这会降低团队部署门槛，但实际成本仍取决于调用规模。",
+    importance: 8,
+  };
+  const fallback: ArticleInput = {
+    sourceId: "qbitai",
+    source: "量子位",
+    title: "Source-only engineering report",
+    displayTitle: "Source-only engineering report",
+    url: "https://example.com/fallback",
+    category: "tech",
+    excerpt: "The source reports a concrete engineering change with enough original context.",
+    summary: "信息有限：仅展示来源原文摘录。The source reports a concrete engineering change with enough original context.",
+    aiAnalysis: "AI 分析暂不可用，请以来源原文为准。",
+    tags: ["信息有限"],
+    importance: 5,
+  };
+  const articles = [enriched, fallback];
+  const html = renderHtml(
+    report,
+    groupRaw(articles, sources),
+    "2026-08-02",
+    [],
+    buildCategoryDigests(articles),
+  );
+
+  await page.setContent(html);
+  const brief = page.locator("[data-panel='tech'] .category-summary");
+  await expect(brief).toHaveCount(1);
+  await expect(brief).toHaveAttribute("open", "");
+  await expect(brief).toContainText("AI 栏目速览");
+  await expect(brief).toContainText("模型部署能力更新");
+  await expect(brief).not.toContainText("Source-only engineering report");
+
+  const fallbackCard = page.locator(".article[data-article-url='https://example.com/fallback']");
+  await expect(fallbackCard.locator(".summary-label")).toHaveText("来源原文摘录");
+  await expect(fallbackCard.locator(".article-analysis")).toHaveCount(0);
+  await expect(fallbackCard.locator(".article-title a")).toHaveAttribute("href", fallback.url);
+  await expect(fallbackCard.locator("a")).toHaveCount(1);
+
+  const fallbackOnlyHtml = renderHtml(
+    report,
+    groupRaw([fallback], sources),
+    "2026-08-02",
+    [],
+    buildCategoryDigests([fallback]),
+  );
+  await page.setContent(fallbackOnlyHtml);
+  await expect(page.locator(".category-summary")).toHaveCount(0);
 });
 
 test("reader preferences and hot-tag suggestions work without a backend", async ({ page }) => {
@@ -295,7 +369,9 @@ test("personalized section renders only incremental matches from the eligible po
     aiAnalysis: "用于回归测试。",
     publishedAt: new Date(Date.UTC(2026, 6, 28, 0, 16 - index)),
   }));
-  const publicRaw = groupRaw(candidates, sources);
+  // The renderer receives the already-selected public set; the final candidate
+  // remains in the full eligible pool for the personalized incremental pass.
+  const publicRaw = groupRaw(candidates.slice(0, 15), sources, { skipPublicSelection: true });
   const personalized = selectPersonalizedArticles(candidates, publicRaw, ["Robotics"]);
   const html = renderHtml(
     report,
@@ -329,7 +405,7 @@ test("Google Trends cards expose the original query and explain editorial import
     aiAnalysis: "这笔交易可能改变球队季后赛竞争力，并影响同位置球员的后续市场估值。",
     importance: 3,
   };
-  const html = renderHtml(report, groupRaw([article], sources), "2026-07-24", []);
+  const html = renderHtml(report, groupRaw([article], sources, { skipPublicSelection: true }), "2026-07-24", []);
 
   await page.setContent(html);
   await expect(page.locator(".article-title")).toContainText("乔丹·罗杰斯相关搜索热度上升");
@@ -451,7 +527,7 @@ test("continuous stream keeps sections in one flow and progressively reveals mor
     tags: ["国际"],
     importance: 7,
   };
-  const html = renderHtml(report, groupRaw([...trending, tech, politics], sources), "2026-07-10", []);
+  const html = renderHtml(report, groupRaw([...trending, tech, politics], sources, { skipPublicSelection: true }), "2026-07-10", []);
 
   await page.setContent(html);
 
@@ -498,7 +574,7 @@ test("mobile navigation keeps the current subsection directly reachable", async 
     { sourceId: "qbitai", source: "量子位", title: "QbitAI item", url: "https://example.com/qbitai", category: "tech", summary: "量子位摘要" },
     { sourceId: "openai-news", source: "OpenAI News", title: "OpenAI item", url: "https://example.com/openai", category: "tech", summary: "OpenAI 摘要" },
   ];
-  await page.setContent(renderHtml(report, groupRaw(articles, sources), "2026-07-10", []));
+  await page.setContent(renderHtml(report, groupRaw(articles, sources, { skipPublicSelection: true }), "2026-07-10", []));
   await page.locator(".tab[data-tab='tech']").click();
 
   const aiNewsSub = page.locator("#mobileSubTabs .sub-tab[data-sub='ai-news']");
@@ -539,7 +615,7 @@ test("desktop sidebar keeps current subsection shortcuts visible and category-co
     { sourceId: "github-trending", source: "GitHub Trending", title: "GitHub", url: "https://example.com/desktop/github", category: "tech", summary: "GitHub 摘要" },
     { sourceId: "qbitai", source: "量子位", title: "AI", url: "https://example.com/desktop/ai", category: "tech", summary: "AI 摘要" },
   ];
-  await page.setContent(renderHtml(report, groupRaw(articles, sources), "2026-07-10", []));
+  await page.setContent(renderHtml(report, groupRaw(articles, sources, { skipPublicSelection: true }), "2026-07-10", []));
   await page.locator(".tab[data-tab='tech']").click();
 
   const shortcuts = page.locator("#mobileSubTabs");
@@ -598,7 +674,7 @@ test("tag navigation reveals a matching article beyond the current batch", async
     summary: `标签跳转测试 ${index + 1}`,
     tags: [index === 12 ? "后续目标" : "首批标签"],
   }));
-  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+  const html = renderHtml(report, groupRaw(articles, sources, { skipPublicSelection: true }), "2026-07-10", []);
 
   await page.setContent(html);
   const target = page.locator(".article[data-article-url='https://example.com/tagged/13']");
@@ -619,7 +695,7 @@ test("reload anchor restores the matching article after page load", async ({ pag
     category: "trending",
     summary: `刷新后阅读位置恢复测试 ${index + 1}`,
   }));
-  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+  const html = renderHtml(report, groupRaw(articles, sources, { skipPublicSelection: true }), "2026-07-10", []);
   await page.route("https://brief.test/restore", async (route) => {
     await route.fulfill({ status: 200, contentType: "text/html", body: html });
   });
