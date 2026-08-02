@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseConsolidatedResult } from "../lib/ai/consolidated-validation";
 import { aiReview, consolidatedEnrich, createEnrichmentControl, hasUnsupportedHighRiskClaim, isLowInformationHotSearch, looksLikeGarbledAiText, resolveReviewBlockingItems } from "../lib/ai/enrich";
-import { buildDailyReportFromEnriched, canPublishLimitedSourceOnlyEdition, createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
+import { buildDailyReportFromEnriched, canPublishLimitedCircuitEdition, createReviewUnavailableFallback, createReviewUnavailableFallbackArticles, hasHighRiskReviewContent, selectRoundRobin } from "../lib/ai/pipeline";
 import { parseReportSidecar } from "../lib/output/sidecar";
 import { filterRawArticles, groupRaw, safeExternalUrl, selectPersonalizedArticles, visibleArticlesFromRaw } from "../lib/output/render";
 import { sourceRegistrySchema } from "../lib/sources/schema";
@@ -640,28 +640,34 @@ test("reviewer outage fallback is source-only and excludes high-risk content", (
   assert.equal(hasHighRiskReviewContent({ ...lowRisk, title: "Official says minister resigned" }), true);
 });
 
-test("limited source-only publication never bypasses mixed AI or high-risk review failures", () => {
-  assert.equal(canPublishLimitedSourceOnlyEdition({
+test("limited circuit publication permits safe mixed output but never bypasses factual-risk failures", () => {
+  assert.equal(canPublishLimitedCircuitEdition({
     enrichmentStopReason: "empty_response",
-    aiEnrichedArticles: 0,
     sourceFallbackArticles: 100,
     hasHighRiskContent: false,
+    hasDisallowedReviewRisk: false,
   }), true);
-  assert.equal(canPublishLimitedSourceOnlyEdition({
+  assert.equal(canPublishLimitedCircuitEdition({
     enrichmentStopReason: "empty_response",
-    aiEnrichedArticles: 1,
     sourceFallbackArticles: 99,
     hasHighRiskContent: false,
-  }), false);
-  assert.equal(canPublishLimitedSourceOnlyEdition({
+    hasDisallowedReviewRisk: false,
+  }), true);
+  assert.equal(canPublishLimitedCircuitEdition({
     enrichmentStopReason: "budget",
-    aiEnrichedArticles: 0,
     sourceFallbackArticles: 100,
     hasHighRiskContent: true,
+    hasDisallowedReviewRisk: false,
   }), false);
-  assert.equal(canPublishLimitedSourceOnlyEdition({
-    aiEnrichedArticles: 0,
+  assert.equal(canPublishLimitedCircuitEdition({
     sourceFallbackArticles: 100,
     hasHighRiskContent: false,
+    hasDisallowedReviewRisk: false,
+  }), false);
+  assert.equal(canPublishLimitedCircuitEdition({
+    enrichmentStopReason: "empty_response",
+    sourceFallbackArticles: 100,
+    hasHighRiskContent: false,
+    hasDisallowedReviewRisk: true,
   }), false);
 });

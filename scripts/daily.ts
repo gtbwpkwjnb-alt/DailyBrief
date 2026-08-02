@@ -10,7 +10,7 @@ import { filterFreshArticles } from "../lib/sources/freshness";
 import {
   createReviewUnavailableFallback,
   createReviewUnavailableFallbackArticles,
-  canPublishLimitedSourceOnlyEdition,
+  canPublishLimitedCircuitEdition,
   buildDailyReportFromEnriched,
   hasHighRiskReviewContent,
   type ArticleInput,
@@ -1148,11 +1148,13 @@ async function main() {
   }
   const reviewedArticles = Array.from(visibleByCategory.values()).flat();
   const highRiskReviewContent = reviewedArticles.some(hasHighRiskReviewContent);
-  const isSourceOnlyCircuitEdition = canPublishLimitedSourceOnlyEdition({
+  const disallowedLimitedEditionRisk = /编造|捏造|幻觉|不实|无依据|事实(?:性)?错误|严重错误|unsupported|fabricat|hallucin|false claim/i
+    .test(`${review.summary} ${review.issues.join(" ")}`);
+  const isSourceOnlyCircuitEdition = canPublishLimitedCircuitEdition({
     enrichmentStopReason: enrichmentControl.reason,
-    aiEnrichedArticles: runStats.aiEnrichedArticles ?? 0,
     sourceFallbackArticles: runStats.sourceFallbackArticles ?? 0,
     hasHighRiskContent: highRiskReviewContent,
+    hasDisallowedReviewRisk: disallowedLimitedEditionRisk,
   });
   if (review.reviewState === "failed" && review.blockingScope === "systemic" && isSourceOnlyCircuitEdition) {
     review.publicationState = "limited";
