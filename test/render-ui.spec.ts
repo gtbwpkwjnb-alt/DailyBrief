@@ -110,8 +110,12 @@ test("public review output exposes target evidence fields without operator contr
       sourceSuccessRate: 11 / 12,
       fetchedArticles: 120,
       dedupedArticles: 96,
-      displayedArticles: 1,
+      displayedArticles: 3,
       aiEnrichedArticles: 1,
+      sourceFallbackArticles: 1,
+      suppressedArticles: 1,
+      enrichmentCircuitOpen: true,
+      enrichmentStopReason: "empty_response",
       freshnessWindowHours: 72,
       freshArticles: 82,
       staleArticlesRejected: 12,
@@ -160,7 +164,10 @@ test("public review output exposes target evidence fields without operator contr
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("初筛候选");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("82 条");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("前端精选");
-  await expect(page.locator("[data-testid='edition-quality']")).toContainText("AI 精炼 1/1");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("AI 精炼 1/3");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("来源原文降级 1 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("已屏蔽 1 条");
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("空响应熔断");
   await expect(page.locator("[data-testid='edition-quality']")).toContainText("抽检通过");
   await expect(page.locator("[data-testid='reader-tools']")).toContainText("公共日报");
   await expect(page.locator("[data-testid='reader-tools']")).toContainText("按 URL 和规范化标题去重");

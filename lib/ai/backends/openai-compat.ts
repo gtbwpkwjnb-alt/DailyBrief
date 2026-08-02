@@ -104,6 +104,12 @@ export async function runOpenAICompat(
       { timeout: timeoutMs },
     );
     const text = (resp.choices[0]?.message?.content ?? "").trim();
+    if (!text) {
+      const finishReason = resp.choices[0]?.finish_reason ?? "missing";
+      throw new Error(
+        `LLM_EMPTY_RESPONSE backend=${cfg.backend} model=${model} finish_reason=${finishReason}`,
+      );
+    }
     const durationMs = Date.now() - started;
     logLlmCall({
       ts: new Date(started).toISOString(),

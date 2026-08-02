@@ -268,6 +268,9 @@ export type RunStats = {
   aiEnrichedArticles?: number;
   enrichmentVersion?: number;
   suppressedArticles?: number;
+  sourceFallbackArticles?: number;
+  enrichmentCircuitOpen?: boolean;
+  enrichmentStopReason?: "budget" | "empty_response";
   freshnessWindowHours?: number;
   freshArticles?: number;
   staleArticlesRejected?: number;
@@ -1090,6 +1093,12 @@ export function renderHtml(
   const aiEnrichedArticleCount = runStats?.aiEnrichedArticles
     ?? visibleStreamArticles.filter((article) => article.displayTitle && article.summary).length;
   const suppressedArticleCount = runStats?.suppressedArticles ?? 0;
+  const sourceFallbackArticleCount = runStats?.sourceFallbackArticles ?? 0;
+  const enrichmentStopText = runStats?.enrichmentStopReason === "budget"
+    ? (REPORT_LOCALE === "en" ? "; AI budget exhausted" : " · AI 预算耗尽")
+    : runStats?.enrichmentStopReason === "empty_response"
+      ? (REPORT_LOCALE === "en" ? "; empty-response circuit opened" : " · 空响应熔断")
+      : "";
   const freshnessRejectedCount = Math.max(0, dedupedArticleCount - eligibleArticleCount);
   const sourceSuccessDetail = runStats
     ? `${runStats.successfulSources}/${runStats.fetchedSources} · ${(runStats.sourceSuccessRate * 100).toFixed(1)}%`
@@ -1100,7 +1109,7 @@ export function renderHtml(
     <dl class="quality-pipeline">
       <div class="quality-stage"><span class="quality-stage-index">1</span><div><dt>${REPORT_LOCALE === "en" ? "Fetched" : "抓取入库"}</dt><dd>${fetchedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? "Sources succeeded" : "来源成功"} ${sourceSuccessDetail}</p></div></div>
       <div class="quality-stage"><span class="quality-stage-index">2</span><div><dt>${REPORT_LOCALE === "en" ? "Eligible pool" : "初筛候选"}</dt><dd>${eligibleArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Deduped ${dedupedArticleCount}; freshness rejected ${freshnessRejectedCount}` : `去重后 ${dedupedArticleCount} 条 · 时效筛除 ${freshnessRejectedCount} 条`}</p></div></div>
-      <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Public ${publicDisplayedArticleCount} + personalized incremental ${personalizedArticleCount}; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? `; garbled items suppressed ${suppressedArticleCount}` : ""}` : `公共精选 ${publicDisplayedArticleCount} 条 + 个性化增量 ${personalizedArticleCount} 条 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${suppressedArticleCount ? ` · 已屏蔽乱码 ${suppressedArticleCount} 条` : ""}`}</p></div></div>
+      <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Public ${publicDisplayedArticleCount} + personalized incremental ${personalizedArticleCount}; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${sourceFallbackArticleCount ? `; source-only fallback ${sourceFallbackArticleCount}` : ""}${suppressedArticleCount ? `; suppressed ${suppressedArticleCount}` : ""}${enrichmentStopText}` : `公共精选 ${publicDisplayedArticleCount} 条 + 个性化增量 ${personalizedArticleCount} 条 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${sourceFallbackArticleCount ? ` · 来源原文降级 ${sourceFallbackArticleCount} 条` : ""}${suppressedArticleCount ? ` · 已屏蔽 ${suppressedArticleCount} 条` : ""}${enrichmentStopText}`}</p></div></div>
     </dl>
     <p class="quality-scope-note">${REPORT_LOCALE === "en" ? "AI enrichment applies to displayed items. The publication quality review is a category sample, not full factual verification." : "AI 逐条精炼只覆盖前端精选内容；发布前质量审核为分栏抽检，不代表对全部候选逐条事实核验。"}</p>
   </section>`;
