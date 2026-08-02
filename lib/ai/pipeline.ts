@@ -71,6 +71,18 @@ export function createReviewUnavailableFallbackArticles(articles: ArticleInput[]
   }));
 }
 
+export function canPublishLimitedSourceOnlyEdition(input: {
+  enrichmentStopReason?: "budget" | "empty_response";
+  aiEnrichedArticles: number;
+  sourceFallbackArticles: number;
+  hasHighRiskContent: boolean;
+}): boolean {
+  return !!input.enrichmentStopReason
+    && input.aiEnrichedArticles === 0
+    && input.sourceFallbackArticles > 0
+    && !input.hasHighRiskContent;
+}
+
 export function createReviewUnavailableFallback(articles: ArticleInput[]): DailyReport {
   const grouped: Record<Category, ArticleInput[]> = { trending: [], tech: [], finance: [], politics: [] };
   for (const article of articles) grouped[article.category].push(article);

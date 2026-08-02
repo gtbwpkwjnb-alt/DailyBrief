@@ -10,6 +10,7 @@ import { filterFreshArticles } from "../lib/sources/freshness";
 import {
   createReviewUnavailableFallback,
   createReviewUnavailableFallbackArticles,
+  canPublishLimitedSourceOnlyEdition,
   buildDailyReportFromEnriched,
   hasHighRiskReviewContent,
   type ArticleInput,
@@ -1147,7 +1148,17 @@ async function main() {
   }
   const reviewedArticles = Array.from(visibleByCategory.values()).flat();
   const highRiskReviewContent = reviewedArticles.some(hasHighRiskReviewContent);
-  if (review.reviewState === "unavailable" && !highRiskReviewContent && enrichmentControl.reason) {
+  const isSourceOnlyCircuitEdition = canPublishLimitedSourceOnlyEdition({
+    enrichmentStopReason: enrichmentControl.reason,
+    aiEnrichedArticles: runStats.aiEnrichedArticles ?? 0,
+    sourceFallbackArticles: runStats.sourceFallbackArticles ?? 0,
+    hasHighRiskContent: highRiskReviewContent,
+  });
+  if (review.reviewState === "failed" && review.blockingScope === "systemic" && isSourceOnlyCircuitEdition) {
+    review.publicationState = "limited";
+    review.summary = `AI 精炼中断；本期以来源原文有限版发布。${review.summary}`;
+    review.suggestions.push("AI 服务恢复后重新生成正式日报；当前内容仅用于浏览来源，不作为已完成的 AI 分析。");
+  } else if (review.reviewState === "unavailable" && !highRiskReviewContent && enrichmentControl.reason) {
     review.publicationState = "limited";
     review.summary = "质量审核服务不可用；已保留通过逐条结构与证据门禁的 AI 精炼内容，失败条目仅以来源原文降级展示。";
     review.issues.push("本期未完成独立 AI 抽检，已在质量分析中标记精炼中断原因和降级范围。");
