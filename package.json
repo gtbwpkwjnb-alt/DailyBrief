@@ -6,6 +6,7 @@
   "scripts": {
     "dry-run": "tsx scripts/dry-run.ts",
     "backtest:freshness": "tsx scripts/backtest-freshness.ts",
+    "backtest:selection": "tsx scripts/backtest-selection.ts",
     "daily": "tsx scripts/daily.ts",
     "render": "tsx scripts/render.ts",
     "render:review": "tsx scripts/render-review-v2.ts",

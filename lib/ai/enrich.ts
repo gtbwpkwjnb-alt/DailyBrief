@@ -984,6 +984,46 @@ export type ConsolidatedEnrichOptions = {
   run?: typeof runLlm;
 };
 
+type EnrichmentBatchOptions = {
+  maxItems?: number;
+  maxChars?: number;
+};
+
+function enrichmentInputSize(item: EnrichInput): number {
+  return JSON.stringify({
+    sourceId: item.sourceId ?? "",
+    url: item.url,
+    title: item.title,
+    excerpt: (item.excerpt ?? "").slice(0, 250),
+    source: item.source ?? "",
+    sourceCountry: item.sourceCountry ?? "",
+    customKeywords: item.customKeywords ?? [],
+  }).length;
+}
+
+export function planEnrichmentBatches(
+  items: EnrichInput[],
+  options: EnrichmentBatchOptions = {},
+): EnrichInput[][] {
+  const maxItems = Math.max(1, Math.floor(options.maxItems ?? 12));
+  const maxChars = Math.max(1, Math.floor(options.maxChars ?? 7_200));
+  const batches: EnrichInput[][] = [];
+  let current: EnrichInput[] = [];
+  let currentChars = 0;
+  for (const item of items) {
+    const itemChars = enrichmentInputSize(item);
+    if (current.length > 0 && (current.length >= maxItems || currentChars + itemChars > maxChars)) {
+      batches.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(item);
+    currentChars += itemChars;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
 export function isLowInformationHotSearch(item: EnrichInput, value: ConsolidatedEnrichment): boolean {
   if (!item.sourceId || !isHotSearchArticle(item.sourceId)) return false;
   const context = item.excerpt?.trim() ?? "";
@@ -1022,12 +1062,17 @@ export async function consolidatedEnrich(
   const sharedOptions = { ...options, control };
   if (!canStartEnrichment(control)) return new Map();
 
-  const batchSize = 15;
-  if (items.length > batchSize) {
+  // Use fewer calls for compact inputs while splitting verbose batches before
+  // they approach provider input/output limits and trigger targeted repairs.
+  const batches = planEnrichmentBatches(items, {
+    maxItems: positiveNumber(process.env.AI_ENRICH_BATCH_MAX_ITEMS, 12),
+    maxChars: positiveNumber(process.env.AI_ENRICH_BATCH_CHAR_BUDGET, 7_200),
+  });
+  if (batches.length > 1) {
     const batched = new Map<string, ConsolidatedEnrichment>();
-    for (let i = 0; i < items.length; i += batchSize) {
+    for (const batch of batches) {
       if (!canStartEnrichment(control)) break;
-      const partial = await consolidatedEnrich(categoryLabel, items.slice(i, i + batchSize), sharedOptions);
+      const partial = await consolidatedEnrich(categoryLabel, batch, sharedOptions);
       for (const [url, value] of partial) batched.set(url, value);
     }
     return batched;
