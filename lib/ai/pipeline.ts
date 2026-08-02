@@ -71,16 +71,16 @@ export function createReviewUnavailableFallbackArticles(articles: ArticleInput[]
   }));
 }
 
-export function canPublishLimitedSourceOnlyEdition(input: {
+export function canPublishLimitedCircuitEdition(input: {
   enrichmentStopReason?: "budget" | "empty_response";
-  aiEnrichedArticles: number;
   sourceFallbackArticles: number;
   hasHighRiskContent: boolean;
+  hasDisallowedReviewRisk: boolean;
 }): boolean {
   return !!input.enrichmentStopReason
-    && input.aiEnrichedArticles === 0
     && input.sourceFallbackArticles > 0
-    && !input.hasHighRiskContent;
+    && !input.hasHighRiskContent
+    && !input.hasDisallowedReviewRisk;
 }
 
 export function createReviewUnavailableFallback(articles: ArticleInput[]): DailyReport {
