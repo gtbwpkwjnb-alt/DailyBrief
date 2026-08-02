@@ -168,11 +168,9 @@ function needsArticleEnrichmentRepair(article: ArticleInput): boolean {
 function canUseSourceOnlyFallback(article: ArticleInput): boolean {
   if (article.category === "politics" || isHotSearchArticle(article.sourceId)) return false;
   if (hasHighRiskReviewContent(article)) return false;
-  const excerpt = (article.excerpt ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  if (excerpt.length < 30 || looksLikeGarbledAiText(excerpt)) return false;
-  const normalizedExcerpt = excerpt.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
-  const normalizedTitle = article.title.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
-  return normalizedExcerpt.length > normalizedTitle.length + 12;
+  const sourceText = `${article.title} ${article.excerpt ?? ""}`.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (sourceText.length < 16) return false;
+  return !/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]|(?:\?{4,})/.test(sourceText);
 }
 
 function createSourceOnlyFallbackMap(articles: ArticleInput[]): Map<string, ArticleInput> {
