@@ -1034,7 +1034,9 @@ async function main() {
     return { key: cfg.key, requested: publishable.length, targeted: targets.length, enriched };
   };
   const enrichmentHealth: Array<{ key: string; requested: number; targeted: number; enriched: number }> = [];
-  const categoryConcurrency = readPositiveInt("AI_ENRICH_CATEGORY_CONCURRENCY", 2);
+  // Start all four categories together so one slow category cannot consume the
+  // shared deadline before the remaining categories get an enrichment attempt.
+  const categoryConcurrency = readPositiveInt("AI_ENRICH_CATEGORY_CONCURRENCY", CATEGORY_CONFIG.length);
   for (let offset = 0; offset < CATEGORY_CONFIG.length; offset += categoryConcurrency) {
     const batch = CATEGORY_CONFIG.slice(offset, offset + categoryConcurrency);
     enrichmentHealth.push(...await Promise.all(batch.map(enrichCategory)));
