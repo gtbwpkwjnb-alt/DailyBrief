@@ -261,7 +261,7 @@ node scripts/install.mjs --global
 
 本地执行 `npm run serve` 后，报告页的运行按钮可直接启动日报，并实时显示网络预检、来源抓取、翻译精炼、质量审核和写入进度。页面会显示本次抓取来源数、原始/去重信息数、来源成功率、AI 筛选规则和增量关键词。最近一次运行距当前不足 5 小时时，按钮会复用已去重缓存，只重做增量筛选；超过 5 小时才重新抓取来源。GitHub Pages 上的按钮不会跳转页面：若未配置安全的 `DAILY_RUN_ENDPOINT`，会直接显示启动失败；远端公开 Actions 状态仍会显示在进度栏中。不要把 GitHub Token 写入 HTML。
 
-若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log`、`logs/llm-calls.jsonl` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这些诊断 artifact 14 天。AI 精炼默认每批最多 4 条、栏目并发 2；遇到 `finish_reason=length` 会立即拆分批次，只重试失败条目。
+若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log`、`logs/llm-calls.jsonl` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这些诊断 artifact 14 天。AI 精炼默认每批最多 4 条、四个栏目并发处理；遇到 `finish_reason=length` 会立即拆分批次，只重试失败条目，避免某个栏目耗尽共享预算后饿死其它栏目。
 
 ---
 
