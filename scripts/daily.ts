@@ -1120,13 +1120,15 @@ async function main() {
   console.log(`[daily] running AI quality review…`);
   const reviewT0 = Date.now();
   const reviewSampleArticles: ArticleInput[] = [];
-  const reviewInput = CATEGORY_CONFIG.map((cfg) => {
-    const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, 8);
-    reviewSampleArticles.push(...items);
-    const lines = items.map((a) => `  - [category=${cfg.key}] [url=${a.url}] [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, 260)}；AI摘要：${a.summary}；AI评价：${a.aiAnalysis ?? "未生成"}`);
+  const buildReviewInput = (perCategory: number, excerptChars: number, collectSamples = false): string => CATEGORY_CONFIG.map((cfg) => {
+    const items = (visibleByCategory.get(cfg.key) ?? []).filter((a) => !!a.summary).slice(0, perCategory);
+    if (collectSamples) reviewSampleArticles.push(...items);
+    const lines = items.map((a) => `  - [category=${cfg.key}] [url=${a.url}] [${a.source}] [媒体所属国 ${a.sourceCountry ?? "未知"}] [涉及国家 ${(a.coverageCountries ?? []).join("、") || "未明确"}] [重要度 ${a.importance ?? 0}/10] 展示标题：${a.displayTitle ?? a.title}；原始标题：${a.title}；原文摘录：${(a.excerpt ?? "").slice(0, excerptChars)}；AI摘要：${a.summary}；AI评价：${a.aiAnalysis ?? "未生成"}`);
     return `【${cfg.label}】(${items.length}条)\n${lines.join("\n")}`;
   }).join("\n\n");
-  const review: ReviewResult = await aiReview(reviewInput);
+  const reviewInput = buildReviewInput(4, 160, true);
+  const compactReviewInput = buildReviewInput(2, 90);
+  const review: ReviewResult = await aiReview(reviewInput, undefined, compactReviewInput);
   const reviewRecovery = resolveReviewBlockingItems(review, reviewSampleArticles);
   const recoveryUrls = new Set(reviewRecovery.urls);
   const affectedReviewCategories = new Set(

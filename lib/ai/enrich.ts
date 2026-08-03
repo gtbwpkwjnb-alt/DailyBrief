@@ -1502,66 +1502,76 @@ export type ReviewRunner = typeof runLlm;
 export async function aiReview(
   categorySummary: string,
   reviewRunner: ReviewRunner = runLlm,
+  compactCategorySummary: string = categorySummary,
 ): Promise<ReviewResult> {
-  try {
-    const { text } = await reviewRunner({
-      systemPrompt: AI_REVIEW_PROMPTS,
-      userPrompt: `请审核以下日报内容：\n\n${categorySummary}\n\n请输出 JSON 格式审核报告。`,
-      timeoutMs: 30_000,
-    });
-    const cleaned = extractJson(text);
-    let parsed: Partial<ReviewResult>;
+  const inputs = [categorySummary, compactCategorySummary, compactCategorySummary];
+  let lastError = "unknown reviewer failure";
+  let attemptsUsed = 0;
+  for (let attempt = 0; attempt < inputs.length; attempt++) {
+    attemptsUsed = attempt + 1;
     try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      parsed = JSON.parse(jsonrepair(cleaned));
+      const { text } = await reviewRunner({
+        systemPrompt: AI_REVIEW_PROMPTS,
+        userPrompt: `请审核以下日报内容：\n\n${inputs[attempt]}\n\n请直接输出简洁 JSON 审核报告，不要输出思考过程。`,
+        timeoutMs: 45_000,
+      });
+      const cleaned = extractJson(text);
+      let parsed: Partial<ReviewResult>;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        parsed = JSON.parse(jsonrepair(cleaned));
+      }
+      const issues = Array.isArray(parsed.issues) ? parsed.issues.filter((issue): issue is string => typeof issue === "string") : [];
+      const blockingItems = Array.isArray(parsed.blockingItems)
+        ? parsed.blockingItems.flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const candidate = item as Partial<ReviewBlockingItem>;
+            if (typeof candidate.url !== "string" || !/^https?:\/\//i.test(candidate.url) || typeof candidate.reason !== "string" || !candidate.reason.trim()) return [];
+            return [{
+              url: candidate.url,
+              category: typeof candidate.category === "string" ? candidate.category : undefined,
+              reason: candidate.reason.trim(),
+            }];
+          })
+        : [];
+      const hasBlockingIssue = parsed.passed === false || issues.some((issue) => /编造|捏造|幻觉|不实|无依据|事实错误|事实性错误|严重错误|缺少摘要|无摘要|未翻译|unsupported|fabricat|hallucin|false claim/i.test(issue));
+      const requestedScope = parsed.blockingScope;
+      const blockingScope: ReviewResult["blockingScope"] = !hasBlockingIssue
+        ? "none"
+        : requestedScope === "items" && blockingItems.length > 0
+          ? "items"
+          : "systemic";
+      return {
+        passed: !hasBlockingIssue,
+        summary: parsed.summary ?? "",
+        issues,
+        suggestions: Array.isArray(parsed.suggestions)
+          ? parsed.suggestions.filter((suggestion): suggestion is string => typeof suggestion === "string")
+          : [],
+        reviewState: hasBlockingIssue ? "failed" : "passed",
+        publicationState: hasBlockingIssue ? "blocked" : "eligible",
+        failureCodes: hasBlockingIssue ? ["AI_REVIEW_BLOCKED"] : [],
+        blockingScope,
+        blockingItems: hasBlockingIssue ? blockingItems : [],
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      const retryable = /LLM_OUTPUT_LIMIT|LLM_EMPTY_RESPONSE|LLM_TRUNCATED_JSON|LLM_EMPTY_RESULT|unexpected end|JSON|timeout|ECONN|HTTP 5\d\d/i.test(lastError);
+      if (!retryable || attempt === inputs.length - 1) break;
+      console.warn(`[enrich] AI review attempt ${attempt + 1}/${inputs.length} failed: ${lastError}; retrying with compact input`);
     }
-    const issues = Array.isArray(parsed.issues) ? parsed.issues.filter((issue): issue is string => typeof issue === "string") : [];
-    const blockingItems = Array.isArray(parsed.blockingItems)
-      ? parsed.blockingItems.flatMap((item) => {
-          if (!item || typeof item !== "object") return [];
-          const candidate = item as Partial<ReviewBlockingItem>;
-          if (typeof candidate.url !== "string" || !/^https?:\/\//i.test(candidate.url) || typeof candidate.reason !== "string" || !candidate.reason.trim()) return [];
-          return [{
-            url: candidate.url,
-            category: typeof candidate.category === "string" ? candidate.category : undefined,
-            reason: candidate.reason.trim(),
-          }];
-        })
-      : [];
-    const hasBlockingIssue = parsed.passed === false || issues.some((issue) => /编造|捏造|幻觉|不实|无依据|事实错误|事实性错误|严重错误|缺少摘要|无摘要|未翻译|unsupported|fabricat|hallucin|false claim/i.test(issue));
-    const requestedScope = parsed.blockingScope;
-    const blockingScope: ReviewResult["blockingScope"] = !hasBlockingIssue
-      ? "none"
-      : requestedScope === "items" && blockingItems.length > 0
-        ? "items"
-        : "systemic";
-    return {
-      passed: !hasBlockingIssue,
-      summary: parsed.summary ?? "",
-      issues,
-      suggestions: Array.isArray(parsed.suggestions)
-        ? parsed.suggestions.filter((suggestion): suggestion is string => typeof suggestion === "string")
-        : [],
-      reviewState: hasBlockingIssue ? "failed" : "passed",
-      publicationState: hasBlockingIssue ? "blocked" : "eligible",
-      failureCodes: hasBlockingIssue ? ["AI_REVIEW_BLOCKED"] : [],
-      blockingScope,
-      blockingItems: hasBlockingIssue ? blockingItems : [],
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[enrich] AI review failed: ${msg}`);
-    return {
-      passed: false,
-      summary: "审核服务不可用，尚未通过质量审核。",
-      issues: ["AI quality review service unavailable"],
-      suggestions: [],
-      reviewState: "unavailable",
-      publicationState: "blocked",
-      failureCodes: ["AI_REVIEW_UNAVAILABLE"],
-      blockingScope: "systemic",
-      blockingItems: [],
-    };
   }
+  console.warn(`[enrich] AI review failed after ${attemptsUsed} attempt(s): ${lastError}`);
+  return {
+    passed: false,
+    summary: "审核服务不可用，尚未通过质量审核。",
+    issues: ["AI quality review service unavailable"],
+    suggestions: [],
+    reviewState: "unavailable",
+    publicationState: "blocked",
+    failureCodes: ["AI_REVIEW_UNAVAILABLE"],
+    blockingScope: "systemic",
+    blockingItems: [],
+  };
 }
