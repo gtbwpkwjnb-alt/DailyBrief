@@ -1,6 +1,12 @@
 import fs from "node:fs";
 
-export type LlmErrorCategory = "timeout" | "quota" | "auth" | "other" | null;
+export type LlmErrorCategory = "timeout" | "quota" | "auth" | "output_limit" | "other" | null;
+
+export interface LlmTokenUsage {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+}
 
 export interface LlmCallRecord {
   ts: string;
@@ -10,6 +16,10 @@ export interface LlmCallRecord {
   success: boolean;
   inputChars: number;
   outputChars: number;
+  /** Provider termination metadata only; never contains prompt or response text. */
+  finishReason?: string | null;
+  usage?: LlmTokenUsage | null;
+  visibleOutputChars?: number;
   errorCategory: LlmErrorCategory;
   errorSnippet: string | null;
 }
@@ -33,6 +43,7 @@ const AUTH_PATTERN =
 
 export function classifyError(blob: string): LlmErrorCategory {
   if (!blob.trim()) return null;
+  if (/LLM_OUTPUT_LIMIT/i.test(blob)) return "output_limit";
   if (/timeout|timed out|etimedout/i.test(blob)) return "timeout";
   if (QUOTA_PATTERN.test(blob)) return "quota";
   if (AUTH_PATTERN.test(blob)) return "auth";

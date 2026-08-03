@@ -190,8 +190,58 @@ test("AI enrichment batches adapt to item count and prompt size", () => {
     title: `Batch item ${index}`,
     excerpt: index === 3 ? "x".repeat(250) : "short context",
   }));
+  assert.deepEqual(planEnrichmentBatches(items).map((batch) => batch.length), [4, 3]);
   assert.deepEqual(planEnrichmentBatches(items, { maxItems: 4, maxChars: 10_000 }).map((batch) => batch.length), [4, 3]);
   assert.deepEqual(planEnrichmentBatches(items, { maxItems: 12, maxChars: 500 }).map((batch) => batch.length), [3, 1, 3]);
+  assert.deepEqual(planEnrichmentBatches(items, {
+    maxItems: 12,
+    maxChars: 10_000,
+    maxOutputChars: 2_400,
+    estimatedOutputCharsPerItem: 1_200,
+  }).map((batch) => batch.length), [2, 2, 2, 1]);
+});
+
+test("consolidated enrichment bisects an output-limited batch without replaying it", async () => {
+  const urls = Array.from({ length: 4 }, (_, index) => `https://example.com/output-limit-${index}`);
+  const requestedBatches: string[][] = [];
+  const result = await consolidatedEnrich("技术动态", urls.map((url) => ({
+    url,
+    title: `Article ${url}`,
+    excerpt: "A concrete source excerpt with enough detail for reliable enrichment.",
+  })), {
+    run: async ({ userPrompt }) => {
+      const requested = urls.filter((url) => userPrompt.includes(url));
+      requestedBatches.push(requested);
+      if (requested.length === 4) throw new Error("LLM_OUTPUT_LIMIT finish_reason=length");
+      return { durationMs: 1, text: JSON.stringify({ items: requested.map(consolidatedItem) }) };
+    },
+  });
+
+  assert.equal(result.size, 4);
+  assert.deepEqual(requestedBatches.map((batch) => batch.length), [4, 2, 2]);
+  assert.equal(requestedBatches.filter((batch) => batch.length === 4).length, 1);
+});
+
+test("a single output-limited item retains the bounded three-attempt failure policy", async () => {
+  const url = "https://example.com/single-output-limit";
+  const control = createEnrichmentControl({ budgetMs: 60_000, emptyFailureThreshold: 3 });
+  let calls = 0;
+  const result = await consolidatedEnrich("技术动态", [{
+    url,
+    title: "Single output-limited item",
+    excerpt: "A concrete source excerpt with enough detail for reliable enrichment.",
+  }], {
+    control,
+    run: async () => {
+      calls++;
+      throw new Error("LLM_OUTPUT_LIMIT finish_reason=length");
+    },
+  });
+
+  assert.equal(result.size, 0);
+  assert.equal(calls, 3);
+  assert.equal(control.attemptsByUrl.get(url), 3);
+  assert.equal(control.circuitOpen, true);
 });
 
 function consolidatedItem(url: string) {

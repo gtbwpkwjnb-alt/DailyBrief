@@ -252,6 +252,62 @@ test("AI section briefs exclude source-only fallback cards", async ({ page }) =>
   await expect(page.locator(".category-summary")).toHaveCount(0);
 });
 
+test("limited source edition hides empty sections and presents every short edition", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const articles = Array.from({ length: 14 }, (_, index): ArticleInput => ({
+    sourceId: index < 8 ? "github-trending" : "bloomberg-markets",
+    source: index < 8 ? "GitHub Trending" : "Bloomberg Markets",
+    title: `Fallback source item ${index + 1}`,
+    displayTitle: `Fallback source item ${index + 1}`,
+    url: `https://example.com/fallback-limited/${index + 1}`,
+    category: index < 8 ? "tech" : "finance",
+    excerpt: "来源原文摘录，用于验证信息有限版的阅读和栏目呈现。",
+    summary: "信息有限：仅展示来源原文摘录。",
+    tags: ["信息有限"],
+  }));
+  const html = renderHtml(
+    report,
+    groupRaw(articles, sources, { skipPublicSelection: true }),
+    "2026-08-03",
+    [],
+    undefined,
+    { passed: false, summary: "AI 精炼中断；本期以来源原文有限版发布。", issues: ["AI 服务未完成输出"], suggestions: [] },
+    {
+      fetchedSources: 59,
+      successfulSources: 59,
+      sourceSuccessRate: 1,
+      fetchedArticles: 1256,
+      dedupedArticles: 1217,
+      freshArticles: 721,
+      displayedArticles: 14,
+      aiTargetArticles: 60,
+      aiEnrichedArticles: 0,
+      sourceFallbackCandidateArticles: 26,
+      sourceFallbackSecondaryFilteredArticles: 12,
+      sourceFallbackArticles: 14,
+      finalPublishedArticles: 14,
+      generatedAt: "2026-08-03T07:10:00.000Z",
+      mode: "fresh",
+    },
+  );
+
+  await page.setContent(html);
+  await expect(page.locator(".tab")).toHaveCount(2);
+  await expect(page.locator(".tab")).toContainText(["技术动态", "财经要点"]);
+  await expect(page.locator("[data-panel='trending'], [data-panel='politics']")).toHaveCount(0);
+  await expect(page.locator("body")).toHaveAttribute("data-active-category", "tech");
+  await expect(page.locator(".stream-pending")).toHaveCount(0);
+  await expect(page.locator(".tag-cloud")).toHaveCount(0);
+  await expect(page.locator(".review-panel")).toHaveCount(0);
+  await expect(page.locator("[data-testid='edition-quality']")).toHaveClass(/limited-edition/);
+  await expect(page.locator("[data-testid='edition-quality']")).toContainText("信息有限版");
+  await expect(page.locator(".quality-fallback-chain")).toContainText("AI 目标 60 条");
+  await expect(page.locator(".quality-fallback-chain")).toContainText("降级候选 26 条");
+  await expect(page.locator(".quality-fallback-chain")).toContainText("二次筛除 12 条");
+  await expect(page.locator(".quality-fallback-chain")).toContainText("最终发布 14 条");
+  await expect(page.locator("#mobileSubTabs [data-cat='trending'], #mobileSubTabs [data-cat='politics']")).toHaveCount(0);
+});
+
 test("reader preferences and hot-tag suggestions work without a backend", async ({ page }) => {
   const articles: ArticleInput[] = [
     {
@@ -486,9 +542,10 @@ test("Signal White theme remains readable without mobile overflow", async ({ pag
   expect(colors.header).toBe("rgb(11, 19, 43)");
   expect(colors.title).toBe("rgb(248, 251, 255)");
   expect(colors.background).not.toBe("");
-  await expect(page.locator("body")).toHaveAttribute("data-active-category", "trending");
+  await expect(page.locator("body")).toHaveAttribute("data-active-category", "tech");
+  await expect(page.locator(".tab")).toHaveCount(0);
   expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.width);
-  await expect(page.locator(".tabs")).toBeVisible();
+  await expect(page.locator(".tabs")).toBeHidden();
   await expect(page.locator(".reading-context")).toBeVisible();
 });
 
@@ -534,7 +591,7 @@ test("continuous stream keeps sections in one flow and progressively reveals mor
   await expect(page.locator("[data-panel='trending']")).toBeVisible();
   const trendingBackground = await page.locator("body").evaluate((element: unknown) => (globalThis as any).getComputedStyle(element).backgroundColor);
   await expect(page.locator("body")).toHaveAttribute("data-active-category", "trending");
-  await expect(page.locator(".article.stream-pending")).toHaveCount(4);
+  await expect(page.locator(".article.stream-pending")).toHaveCount(0);
   await page.locator(".tab[data-tab='tech']").click();
   await expect(page.locator("[data-panel='tech']")).toBeVisible();
   await expect(page.locator("[data-panel='trending']")).toBeVisible();
@@ -552,9 +609,9 @@ test("mobile category spy keeps the active category inside the horizontal naviga
     { sourceId: "google-trends-us", source: "Google Trends", title: "Trend", url: "https://example.com/t", category: "trending", summary: "趋势摘要" },
     { sourceId: "github-trending", source: "GitHub Trending", title: "Tech", url: "https://example.com/a", category: "tech", summary: "技术摘要" },
     { sourceId: "bbc-world", source: "BBC World", title: "World", url: "https://example.com/p", category: "politics", summary: "国际摘要" },
-    { sourceId: "wallstreetcn", source: "WallstreetCN", title: "Finance", url: "https://example.com/f", category: "finance", summary: "财经摘要" },
+    { sourceId: "bloomberg-markets", source: "Bloomberg Markets", title: "Finance", url: "https://example.com/f", category: "finance", summary: "财经摘要" },
   ];
-  const html = renderHtml(report, groupRaw(articles, sources), "2026-07-10", []);
+  const html = renderHtml(report, groupRaw(articles, sources, { skipPublicSelection: true }), "2026-07-10", []);
 
   await page.setContent(html);
   const financeTab = page.locator(".tab[data-tab='finance']");
@@ -664,21 +721,21 @@ test("edition polling preserves existing query parameters", async ({ page }) => 
   expect(refreshUrl.searchParams.get("edition")).toMatch(/^\d+$/);
 });
 
-test("tag navigation reveals a matching article beyond the current batch", async ({ page }) => {
-  const articles = Array.from({ length: 13 }, (_, index): ArticleInput => ({
-    sourceId: "google-trends-us",
-    source: "Google Trends",
+test("tag navigation reaches a matching article in a long stream", async ({ page }) => {
+  const articles = Array.from({ length: 31 }, (_, index): ArticleInput => ({
+    sourceId: ["github-trending", "qbitai", "openai-news"][index % 3],
+    source: ["GitHub Trending", "量子位", "OpenAI News"][index % 3],
     title: `Tagged item ${index + 1}`,
+    displayTitle: `标签导航条目 ${index + 1}`,
     url: `https://example.com/tagged/${index + 1}`,
-    category: "trending",
+    category: "tech",
     summary: `标签跳转测试 ${index + 1}`,
-    tags: [index === 12 ? "后续目标" : "首批标签"],
+    tags: [index === 30 ? "后续目标" : "首批标签"],
   }));
   const html = renderHtml(report, groupRaw(articles, sources, { skipPublicSelection: true }), "2026-07-10", []);
 
   await page.setContent(html);
-  const target = page.locator(".article[data-article-url='https://example.com/tagged/13']");
-  await expect(target).toHaveClass(/stream-pending/);
+  const target = page.locator(".article[data-article-url='https://example.com/tagged/31']");
   await page.locator(".brief-meta-summary").click();
   await page.locator(".tag-cloud-chip[data-tag='后续目标']").click();
   await expect(target).not.toHaveClass(/stream-pending/);

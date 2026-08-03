@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { classifyError, logLlmCall } from "../log";
+import { classifyError, logLlmCall, type LlmTokenUsage } from "../log";
 import type { LlmRunOptions, LlmRunResult } from "../llm";
 
 /**
@@ -44,6 +44,51 @@ export const PRESETS: Record<OpenAICompatConfig["backend"], OpenAICompatConfig> 
 
 const clientCache = new Map<string, OpenAI>();
 
+type OpenAICompletionLike = {
+  choices: Array<{
+    finish_reason?: string | null;
+    message?: { content?: string | null };
+  }>;
+  usage?: {
+    prompt_tokens?: number | null;
+    completion_tokens?: number | null;
+    total_tokens?: number | null;
+  } | null;
+};
+
+export interface OpenAICompletionMetadata {
+  text: string;
+  finishReason: string;
+  outputLimited: boolean;
+  visibleOutputChars: number;
+  usage: LlmTokenUsage | null;
+}
+
+/** Testable response inspection that deliberately excludes all response text from logs. */
+export function inspectOpenAICompletion(resp: OpenAICompletionLike): OpenAICompletionMetadata {
+  const text = (resp.choices[0]?.message?.content ?? "").trim();
+  const finishReason = resp.choices[0]?.finish_reason ?? "missing";
+  const usage = resp.usage
+    ? {
+        promptTokens: resp.usage.prompt_tokens ?? null,
+        completionTokens: resp.usage.completion_tokens ?? null,
+        totalTokens: resp.usage.total_tokens ?? null,
+      }
+    : null;
+  return {
+    text,
+    finishReason,
+    outputLimited: finishReason.toLowerCase() === "length",
+    visibleOutputChars: text.length,
+    usage,
+  };
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
 function getClient(cfg: OpenAICompatConfig): { client: OpenAI; model: string } {
   // Provider-specific env wins; LLM_API_KEY / LLM_BASE_URL are generic
   // aliases so users pointing at a non-preset OpenAI-compatible service
@@ -81,6 +126,9 @@ export async function runOpenAICompat(
   const started = Date.now();
   const inputChars = opts.systemPrompt.length + opts.userPrompt.length;
   const timeoutMs = opts.timeoutMs ?? 180_000;
+  let finishReason: string | null = null;
+  let usage: LlmTokenUsage | null = null;
+  let visibleOutputChars = 0;
 
   try {
     const resp = await client.chat.completions.create(
@@ -90,22 +138,27 @@ export async function runOpenAICompat(
           { role: "system", content: opts.systemPrompt },
           { role: "user", content: opts.userPrompt },
         ],
-        // Explicit max_tokens — most providers default low (DeepSeek 4096,
-        // some MiniMax variants 2048). A 16-item batch enrichment routinely
-        // exceeds 4K output tokens once you count Chinese chars + JSON
-        // structure, and silent truncation made it through with just 1/16
-        // entries parseable. 8192 covers all observed daily batches with
-        // generous headroom. Match the explicit value Anthropic SDK uses.
-        max_tokens: 8192,
+        // Keep an explicit, configurable output ceiling. Batch planning keeps
+        // normal calls well below it; the finish reason still acts as the
+        // authoritative signal when a provider reaches the ceiling.
+        max_tokens: positiveInteger(process.env.LLM_MAX_OUTPUT_TOKENS, 8192),
         // Don't force JSON mode — not all OpenAI-compat providers support
         // response_format=json_object, and our prompts + jsonrepair already
         // handle the slop.
       },
       { timeout: timeoutMs },
     );
-    const text = (resp.choices[0]?.message?.content ?? "").trim();
+    const completion = inspectOpenAICompletion(resp);
+    const { text } = completion;
+    finishReason = completion.finishReason;
+    usage = completion.usage;
+    visibleOutputChars = completion.visibleOutputChars;
+    if (completion.outputLimited) {
+      throw new Error(
+        `LLM_OUTPUT_LIMIT backend=${cfg.backend} model=${model} finish_reason=${finishReason} visible_chars=${visibleOutputChars}`,
+      );
+    }
     if (!text) {
-      const finishReason = resp.choices[0]?.finish_reason ?? "missing";
       throw new Error(
         `LLM_EMPTY_RESPONSE backend=${cfg.backend} model=${model} finish_reason=${finishReason}`,
       );
@@ -119,6 +172,9 @@ export async function runOpenAICompat(
       success: true,
       inputChars,
       outputChars: text.length,
+      finishReason,
+      usage,
+      visibleOutputChars,
       errorCategory: null,
       errorSnippet: null,
     });
@@ -133,7 +189,10 @@ export async function runOpenAICompat(
       durationMs,
       success: false,
       inputChars,
-      outputChars: 0,
+      outputChars: visibleOutputChars,
+      finishReason,
+      usage,
+      visibleOutputChars,
       errorCategory: classifyError(msg),
       errorSnippet: msg.slice(0, 200),
     });

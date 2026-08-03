@@ -46,6 +46,8 @@ const DEFAULT_TARGETS: Record<Category, number> = {
 const DEFAULT_MINIMUM_QUALITY_SCORE = 72;
 
 const LOW_INFORMATION_TITLE = /^(?:daily\s+discussion|open\s+thread|what\s+are\s+you\s+working\s+on|me_?irl|explain\s+it\s+peter|first|test|hello|闲聊|水帖|每日讨论)$/i;
+const ENTERTAINMENT_TOPIC = /\b(?:album|song|music|singer|concert|film|movie|television|tv\s+series|record\s+review)\b|音乐|歌曲|专辑|歌手|演唱会|电影|影评|电视剧/i;
+const TECHNOLOGY_TOPIC = /\b(?:ai|artificial\s+intelligence|software|hardware|chip|semiconductor|robot|cloud|data|cyber|developer|programming|model|agent|computer|digital|startup|technology|github|open\s+source)\b|人工智能|软件|硬件|芯片|半导体|机器人|云计算|数据|网络安全|开发者|编程|模型|智能体|计算机|数字化|开源/i;
 
 function normalizedText(value: string): string {
   return value
@@ -80,6 +82,32 @@ function similarity(left: ArticleInput, right: ArticleInput): number {
   for (const token of leftTokens) if (rightTokens.has(token)) intersection += 1;
   const union = leftTokens.size + rightTokens.size - intersection;
   return union === 0 ? 0 : intersection / union;
+}
+
+function eventTokens(article: ArticleInput): Set<string> {
+  return new Set(normalizedText(
+    `${article.displayTitle ?? article.title} ${article.summary ?? article.excerpt ?? ""}`,
+  ).split(" ").filter((token) => token.length >= 4));
+}
+
+function sameSourceEventSimilarity(left: ArticleInput, right: ArticleInput): number {
+  if (left.sourceId !== right.sourceId || left.category !== right.category) return 0;
+  // Repeated rolling-event coverage is most common in finance and politics.
+  // Technology feeds often use templated release titles, where this broader
+  // signal would collapse genuinely distinct products.
+  if (left.category !== "finance" && left.category !== "politics") return 0;
+  const leftTokens = eventTokens(left);
+  const rightTokens = eventTokens(right);
+  let intersection = 0;
+  for (const token of leftTokens) if (rightTokens.has(token)) intersection += 1;
+  const union = leftTokens.size + rightTokens.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function isObviousCategoryMismatch(article: ArticleInput): boolean {
+  if (article.category !== "tech") return false;
+  const text = `${article.displayTitle ?? article.title} ${article.summary ?? article.excerpt ?? ""}`;
+  return ENTERTAINMENT_TOPIC.test(text) && !TECHNOLOGY_TOPIC.test(text);
 }
 
 function isLowInformation(article: ArticleInput): boolean {
@@ -196,6 +224,11 @@ export function selectPublicArticles(
       stats.lowInformationFiltered += 1;
       continue;
     }
+    if (isObviousCategoryMismatch(article)) {
+      stats.hardFiltered += 1;
+      stats.qualityFiltered += 1;
+      continue;
+    }
     const score = scoreArticle(article, source, referenceTime);
     if (score < minimumQualityScore) {
       stats.qualityFiltered += 1;
@@ -208,9 +241,10 @@ export function selectPublicArticles(
 
   const representatives: ScoredArticle[] = [];
   for (const candidate of eligible) {
-    const duplicate = representatives.some((kept) =>
-      kept.article.category === candidate.article.category && similarity(kept.article, candidate.article) >= 0.78,
-    );
+    const duplicate = representatives.some((kept) => kept.article.category === candidate.article.category && (
+      similarity(kept.article, candidate.article) >= 0.78
+      || sameSourceEventSimilarity(kept.article, candidate.article) >= 0.38
+    ));
     if (duplicate) {
       stats.eventMerged += 1;
       continue;

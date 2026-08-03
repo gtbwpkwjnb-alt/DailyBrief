@@ -10,9 +10,10 @@ import { filterFreshArticles } from "../lib/sources/freshness";
 import {
   createReviewUnavailableFallback,
   createReviewUnavailableFallbackArticles,
-  canPublishLimitedCircuitEdition,
   buildDailyReportFromEnriched,
+  evaluatePublicationGate,
   hasHighRiskReviewContent,
+  hasUsableAiEnrichment,
   type ArticleInput,
   type DailyReport,
 } from "../lib/ai/pipeline";
@@ -230,6 +231,13 @@ function readPositiveInt(name: string, fallback: number): number {
 function readFraction(name: string, fallback: number): number {
   const value = Number.parseFloat(process.env[name] ?? "");
   return Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback;
+}
+
+function readCategoryList(name: string, fallback: string[]): string[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const values = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  return values.length > 0 ? [...new Set(values)] : fallback;
 }
 
 function sourceHost(source: (typeof sources)[number]): string {
@@ -928,12 +936,19 @@ async function main() {
     mode: cachedRun ? "reuse" : "fresh",
     enrichmentVersion: AI_ENRICHMENT_VERSION,
   };
-  const enrichmentControl = createEnrichmentControl();
+  const sharedEnrichmentBudget = createEnrichmentControl();
+  const enrichmentControls = new Map(CATEGORY_CONFIG.map((cfg) => {
+    const control = createEnrichmentControl();
+    control.deadlineAt = sharedEnrichmentBudget.deadlineAt;
+    return [cfg.key, control] as const;
+  }));
   let sourceFallbackArticles = 0;
+  let sourceFallbackCandidateArticles = 0;
   const fallbackCategories = new Set<string>();
-  const enrichmentHealth = await Promise.all(CATEGORY_CONFIG.map(async (cfg) => {
+  const enrichCategory = async (cfg: (typeof CATEGORY_CONFIG)[number]) => {
+    const categoryControl = enrichmentControls.get(cfg.key)!;
     const items = visibleByCategory.get(cfg.key) ?? [];
-    if (items.length === 0) return { key: cfg.key, requested: 0, enriched: 0 };
+    if (items.length === 0) return { key: cfg.key, requested: 0, targeted: 0, enriched: 0 };
     const targets = cachedRun
       ? items.filter((article) =>
           needsArticleEnrichmentRepair(article)
@@ -952,6 +967,7 @@ async function main() {
         const fallbackByUrl = createSourceOnlyFallbackMap(fallback);
         for (const article of fallback) Object.assign(article, fallbackByUrl.get(article.url));
         sourceFallbackArticles += fallback.length;
+        sourceFallbackCandidateArticles += fallback.length;
         if (fallback.length > 0) fallbackCategories.add(cfg.label);
         const blocked = malformed.filter((article) => !fallbackByUrl.has(article.url));
         blocked.forEach((article) => suppressedUrls.add(article.url));
@@ -960,7 +976,7 @@ async function main() {
       }
       const publishable = items.filter((article) => !suppressedUrls.has(article.url));
       console.log(`[daily]  ${cfg.key.padEnd(12)} cache complete ${publishable.length}/${items.length}`);
-      return { key: cfg.key, requested: publishable.length, enriched: publishable.length };
+      return { key: cfg.key, requested: publishable.length, targeted: 0, enriched: publishable.filter(hasUsableAiEnrichment).length };
     }
     const t1 = Date.now();
     const results = await consolidatedEnrich(
@@ -974,7 +990,7 @@ async function main() {
         sourceCountry: a.sourceCountry,
         customKeywords,
       })),
-      { customKeywords, control: enrichmentControl },
+      { customKeywords, control: categoryControl },
     );
     let matched = 0;
     for (const a of targets) {
@@ -1003,6 +1019,7 @@ async function main() {
       const fallbackByUrl = createSourceOnlyFallbackMap(fallback);
       for (const article of fallback) Object.assign(article, fallbackByUrl.get(article.url));
       sourceFallbackArticles += fallback.length;
+      sourceFallbackCandidateArticles += fallback.length;
       if (fallback.length > 0) fallbackCategories.add(cfg.label);
       for (const article of malformed.filter((candidate) => !fallbackByUrl.has(candidate.url))) {
         suppressedUrls.add(article.url);
@@ -1012,31 +1029,36 @@ async function main() {
       visibleByCategory.set(cfg.key, items.filter((article) => !suppressedUrls.has(article.url)));
     }
     const publishable = items.filter((article) => !suppressedUrls.has(article.url));
-    const enriched = publishable.filter((article) => article.displayTitle && article.summary && article.aiAnalysis).length;
+    const enriched = publishable.filter(hasUsableAiEnrichment).length;
     console.log(`[daily]  ${cfg.key.padEnd(12)} ${matched}/${targets.length} targeted, coverage ${enriched}/${publishable.length} in ${((Date.now()-t1)/1000).toFixed(1)}s`);
-    return { key: cfg.key, requested: publishable.length, enriched: publishable.length };
-  }));
-  const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 1);
-  for (const category of enrichmentHealth) {
-    if (category.requested === 0) continue;
-    const coverage = category.enriched / category.requested;
-    if (coverage < minEnrichmentCoverage) {
-      appendRunLog(date, `blocked by ${category.key} enrichment coverage ${(coverage * 100).toFixed(1)}%`);
-      throw new Error(`${category.key} enrichment coverage ${(coverage * 100).toFixed(1)}% is below MIN_ENRICHMENT_COVERAGE ${(minEnrichmentCoverage * 100).toFixed(1)}%`);
-    }
+    return { key: cfg.key, requested: publishable.length, targeted: targets.length, enriched };
+  };
+  const enrichmentHealth: Array<{ key: string; requested: number; targeted: number; enriched: number }> = [];
+  const categoryConcurrency = readPositiveInt("AI_ENRICH_CATEGORY_CONCURRENCY", 2);
+  for (let offset = 0; offset < CATEGORY_CONFIG.length; offset += categoryConcurrency) {
+    const batch = CATEGORY_CONFIG.slice(offset, offset + categoryConcurrency);
+    enrichmentHealth.push(...await Promise.all(batch.map(enrichCategory)));
   }
+  const categoryControls = [...enrichmentControls.values()];
+  const enrichmentStopReason = categoryControls.some((control) => control.reason === "budget")
+    ? "budget" as const
+    : categoryControls.some((control) => control.reason === "empty_response")
+      ? "empty_response" as const
+      : undefined;
+  const enrichmentCircuitOpen = categoryControls.some((control) => control.circuitOpen);
   if (suppressedUrls.size > 0) {
     const retained = articles.filter((article) => !suppressedUrls.has(article.url));
     articles.length = 0;
     articles.push(...retained);
   }
   runStats.sourceFallbackArticles = sourceFallbackArticles;
-  runStats.enrichmentStopReason = enrichmentControl.reason;
-  runStats.enrichmentCircuitOpen = enrichmentControl.circuitOpen;
+  const aiTargetArticles = enrichmentHealth.reduce((total, category) => total + category.targeted, 0);
+  runStats.enrichmentStopReason = enrichmentStopReason;
+  runStats.enrichmentCircuitOpen = enrichmentCircuitOpen;
   runStats.suppressedArticles = suppressedUrls.size;
   let raw = filterRawArticles(visibleRaw, (article) => !suppressedUrls.has(article.url));
   personalizedArticles = personalizedArticles.filter((article) => !suppressedUrls.has(article.url));
-  if (sourceFallbackArticles > 0 && enrichmentControl.reason) {
+  if (sourceFallbackArticles > 0 && enrichmentStopReason) {
     const limitedSelection = selectPublicArticlesForDisplay(
       visibleArticlesFromRaw(raw),
       sources,
@@ -1053,8 +1075,7 @@ async function main() {
   let displayedArticles = visibleArticlesFromRaw(raw);
   runStats.displayedArticles = displayedArticles.length + personalizedArticles.length;
   runStats.personalizedArticles = personalizedArticles.length;
-  runStats.aiEnrichedArticles = [...displayedArticles, ...personalizedArticles]
-    .filter((article) => article.displayTitle && article.summary && article.aiAnalysis && !/AI 分析暂不可用|AI analysis is unavailable/i.test(article.aiAnalysis)).length;
+  runStats.aiEnrichedArticles = [...displayedArticles, ...personalizedArticles].filter(hasUsableAiEnrichment).length;
   const displayedCategoryCount = new Set([...displayedArticles, ...personalizedArticles].map((article) => article.category)).size;
   const minDisplayedArticles = readPositiveInt("MIN_DISPLAYED_ARTICLES", 10);
   const minDisplayedCategories = readPositiveInt("MIN_DISPLAYED_CATEGORIES", 2);
@@ -1063,7 +1084,7 @@ async function main() {
     throw new Error(`displayed content is below publication floor: ${runStats.displayedArticles}/${minDisplayedArticles} items, ${displayedCategoryCount}/${minDisplayedCategories} categories`);
   }
   if (sourceFallbackArticles > 0) {
-    const reason = enrichmentControl.reason === "budget" ? "AI 精炼预算耗尽" : enrichmentControl.reason === "empty_response" ? "AI 连续空或截断响应触发熔断" : "部分条目三次精炼仍未通过";
+    const reason = enrichmentStopReason === "budget" ? "AI 精炼预算耗尽" : enrichmentStopReason === "empty_response" ? "AI 连续空或截断响应触发熔断" : "部分条目三次精炼仍未通过";
     suppressedSummaryIssues.push(`${reason}；${[...fallbackCategories].join("、")}共 ${sourceFallbackArticles} 条已降级为来源原文摘录。`);
   }
   console.log(`[daily] consolidated enrichment done in ${((Date.now() - enrichT0) / 1000).toFixed(1)}s`);
@@ -1134,8 +1155,7 @@ async function main() {
     runStats.suppressedArticles = suppressedUrls.size;
     runStats.displayedArticles = displayedArticles.length + personalizedArticles.length;
     runStats.personalizedArticles = personalizedArticles.length;
-    runStats.aiEnrichedArticles = [...displayedArticles, ...personalizedArticles]
-      .filter((article) => article.displayTitle && article.summary && article.aiAnalysis && !/AI 分析暂不可用|AI analysis is unavailable/i.test(article.aiAnalysis)).length;
+    runStats.aiEnrichedArticles = [...displayedArticles, ...personalizedArticles].filter(hasUsableAiEnrichment).length;
     const recoveryIssue = `质量审核定位并屏蔽 ${reviewRecovery.urls.length} 条存在发布级事实风险的内容，其余信息继续发布。`;
     review.issues.push(recoveryIssue);
     review.suggestions.push("被屏蔽条目将在下一次抓取和 AI 精炼时重新评估，不进入本期公开输出。");
@@ -1166,19 +1186,7 @@ async function main() {
   }
   const reviewedArticles = Array.from(visibleByCategory.values()).flat();
   const highRiskReviewContent = reviewedArticles.some(hasHighRiskReviewContent);
-  const disallowedLimitedEditionRisk = /编造|捏造|幻觉|不实|无依据|事实(?:性)?错误|严重错误|unsupported|fabricat|hallucin|false claim/i
-    .test(`${review.summary} ${review.issues.join(" ")}`);
-  const isSourceOnlyCircuitEdition = canPublishLimitedCircuitEdition({
-    enrichmentStopReason: enrichmentControl.reason,
-    sourceFallbackArticles: runStats.sourceFallbackArticles ?? 0,
-    hasHighRiskContent: highRiskReviewContent,
-    hasDisallowedReviewRisk: disallowedLimitedEditionRisk,
-  });
-  if (review.reviewState === "failed" && review.blockingScope === "systemic" && isSourceOnlyCircuitEdition) {
-    review.publicationState = "limited";
-    review.summary = `AI 精炼中断；本期以来源原文有限版发布。${review.summary}`;
-    review.suggestions.push("AI 服务恢复后重新生成正式日报；当前内容仅用于浏览来源，不作为已完成的 AI 分析。");
-  } else if (review.reviewState === "unavailable" && !highRiskReviewContent && enrichmentControl.reason) {
+  if (review.reviewState === "unavailable" && !highRiskReviewContent && enrichmentStopReason) {
     review.publicationState = "limited";
     review.summary = "质量审核服务不可用；已保留通过逐条结构与证据门禁的 AI 精炼内容，失败条目仅以来源原文降级展示。";
     review.issues.push("本期未完成独立 AI 抽检，已在质量分析中标记精炼中断原因和降级范围。");
@@ -1211,8 +1219,35 @@ async function main() {
   runStats.sourceFallbackArticles = finalVisibleArticles
     .filter((article) => /AI 分析暂不可用|AI analysis is unavailable/i.test(article.aiAnalysis ?? "")).length;
   runStats.aiEnrichedArticles = finalVisibleArticles
-    .filter((article) => article.displayTitle && article.summary && article.aiAnalysis && !/AI 分析暂不可用|AI analysis is unavailable/i.test(article.aiAnalysis)).length;
+    .filter(hasUsableAiEnrichment).length;
   runStats.suppressedArticles = suppressedUrls.size;
+  const sourceFallbackSecondaryFilteredArticles = Math.max(0, sourceFallbackCandidateArticles - (runStats.sourceFallbackArticles ?? 0));
+  runStats.aiTargetArticles = aiTargetArticles;
+  runStats.sourceFallbackCandidateArticles = sourceFallbackCandidateArticles;
+  runStats.sourceFallbackSecondaryFilteredArticles = sourceFallbackSecondaryFilteredArticles;
+  runStats.finalPublishedArticles = finalVisibleArticles.length;
+  const requiredAiCategories = readCategoryList(
+    "REQUIRED_AI_ENRICHMENT_CATEGORIES",
+    [],
+  );
+  const minEnrichmentCoverage = readFraction("MIN_ENRICHMENT_COVERAGE", 0.7);
+  const gateReasons = evaluatePublicationGate({
+    aiTargetArticles,
+    aiEnrichedArticles: runStats.aiEnrichedArticles ?? 0,
+    aiEnrichedCategories: CATEGORY_CONFIG
+      .filter((cfg) => finalVisibleArticles.some((article) => article.category === cfg.key && hasUsableAiEnrichment(article)))
+      .map((cfg) => cfg.key),
+    requiredCategories: requiredAiCategories,
+    minimumCoverage: minEnrichmentCoverage,
+    reviewState: review.reviewState,
+    blockingScope: review.blockingScope,
+  });
+  if (gateReasons.length > 0) {
+    review.publicationState = "blocked";
+    review.passed = false;
+    review.failureCodes.push(...gateReasons.filter((reason) => !review.failureCodes.includes(reason)));
+    review.issues.push(`发布门禁阻止正式日报：${gateReasons.join("、")}。`);
+  }
   const finalCategoryCount = new Set(finalVisibleArticles.map((article) => article.category)).size;
   if (finalVisibleArticles.length < readPositiveInt("MIN_DISPLAYED_ARTICLES", 10) || finalCategoryCount < readPositiveInt("MIN_DISPLAYED_CATEGORIES", 2)) {
     review.publicationState = "blocked";
@@ -1229,6 +1264,13 @@ async function main() {
       blockingScope: review.blockingScope,
       blockingItems: review.blockingItems,
       recovery: review.recovery,
+      runStats: {
+        ...runStats,
+        aiTargetArticles,
+        sourceFallbackCandidateArticles,
+        sourceFallbackSecondaryFilteredArticles,
+        finalPublishedArticles: finalVisibleArticles.length,
+      },
       issues: review.issues,
       suggestions: review.suggestions,
     }, null, 2), "utf8");
@@ -1245,7 +1287,13 @@ async function main() {
       date,
       articles,
       failedSources,
-      runStats,
+      runStats: {
+        ...runStats,
+        aiTargetArticles,
+        sourceFallbackCandidateArticles,
+        sourceFallbackSecondaryFilteredArticles,
+        finalPublishedArticles: finalVisibleArticles.length,
+      },
       filterProfile,
       qualityReview: {
         passed: review.passed,
@@ -1269,6 +1317,13 @@ async function main() {
     blockingScope: review.blockingScope,
     blockingItems: review.blockingItems,
     recovery: review.recovery,
+    runStats: {
+      ...runStats,
+      aiTargetArticles,
+      sourceFallbackCandidateArticles,
+      sourceFallbackSecondaryFilteredArticles,
+      finalPublishedArticles: finalVisibleArticles.length,
+    },
     issues: review.issues,
     suggestions: review.suggestions,
   }, null, 2), "utf8");

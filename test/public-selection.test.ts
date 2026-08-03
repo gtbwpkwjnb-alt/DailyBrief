@@ -80,3 +80,39 @@ test("high-value density expands a section while low-value supply never fills it
   assert.equal(result.articles.length, 8);
   assert.equal(result.stats.selected, 8);
 });
+
+test("public selection rejects obvious entertainment mismatch and merges same-source event updates", () => {
+  const result = selectPublicArticles([
+    article({
+      sourceId: "core",
+      title: "Album review explores a singer's new acoustic record",
+      excerpt: "The music review discusses songs, vocals, touring, and the artist's latest album.",
+      url: "https://core.example/music-review",
+      category: "tech",
+      importance: 9,
+    }),
+    article({
+      sourceId: "finance",
+      title: "Oil rises as Iran talks approach a decision",
+      excerpt: "Oil prices rose as markets assessed Iran talks and possible changes to crude supply.",
+      url: "https://finance.example/oil-a",
+      category: "finance",
+      importance: 8,
+    }),
+    article({
+      sourceId: "finance",
+      title: "Crude prices gain while markets await Iran negotiations",
+      excerpt: "Crude oil prices gained as markets assessed Iran negotiations and possible changes to supply.",
+      url: "https://finance.example/oil-b",
+      category: "finance",
+      importance: 7,
+    }),
+  ], sources, {
+    categoryTargets: { tech: 4, finance: 4 },
+    referenceTime: new Date("2026-08-02T08:00:00Z"),
+  });
+
+  assert.deepEqual(result.articles.map((item) => item.url), ["https://finance.example/oil-a"]);
+  assert.equal(result.stats.qualityFiltered, 1);
+  assert.equal(result.stats.eventMerged, 1);
+});

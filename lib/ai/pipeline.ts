@@ -54,21 +54,41 @@ export function hasHighRiskReviewContent(item: Pick<ArticleInput, "title" | "exc
   return HIGH_RISK_REVIEW_CONTENT.test(`${item.title} ${item.excerpt ?? ""} ${item.displayTitle ?? ""} ${item.summary ?? ""}`);
 }
 
+export function completeSourceExcerpt(value: string, preferredLimit = 260, searchLimit = 480): string | null {
+  const text = value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  if (text.length <= preferredLimit) return text;
+  const bounded = text.slice(0, Math.max(preferredLimit, searchLimit));
+  const endings = [...bounded.matchAll(/[.!?。！？](?:["'”’）)\]]*)/g)];
+  const preferred = endings.filter((match) => (match.index ?? 0) + match[0].length <= preferredLimit);
+  const match = preferred.at(-1) ?? endings[0];
+  if (!match || match.index === undefined) return null;
+  const end = match.index + match[0].length;
+  return end >= Math.min(60, preferredLimit) ? bounded.slice(0, end).trim() : null;
+}
+
 export function createReviewUnavailableFallbackArticles(articles: ArticleInput[]): ArticleInput[] {
-  return articles.map((article) => ({
-    ...article,
-    displayTitle: article.title,
-    summary: REPORT_LOCALE === "en"
-      ? `Information limited: source excerpt only. ${(article.excerpt ?? article.title).slice(0, 260)}`
-      : `信息有限：仅展示来源原文摘录。${(article.excerpt ?? article.title).slice(0, 260)}`,
-    aiAnalysis: REPORT_LOCALE === "en"
-      ? "AI analysis is unavailable for this item; verify the linked source before drawing conclusions or acting on it."
-      : "本条 AI 分析暂不可用，形成判断或采取行动前请先核验标题所链接的原始来源。",
-    importance: 1,
-    tags: [REPORT_LOCALE === "en" ? "Information limited" : "信息有限"],
-    coverageCountries: [],
-    interestMatches: [],
-  }));
+  return articles.map((article) => {
+    const excerpt = completeSourceExcerpt(article.excerpt ?? article.title);
+    return {
+      ...article,
+      displayTitle: article.title,
+      summary: excerpt
+        ? (REPORT_LOCALE === "en"
+            ? `Information limited: source excerpt only. ${excerpt}`
+            : `信息有限：仅展示来源原文摘录。${excerpt}`)
+        : (REPORT_LOCALE === "en"
+            ? "Information limited: a complete source sentence could not be extracted safely. Open the linked title to verify the original report."
+            : "信息有限：未能安全提取完整来源句子，请打开标题链接核验原始报道。"),
+      aiAnalysis: REPORT_LOCALE === "en"
+        ? "AI analysis is unavailable for this item; verify the linked source before drawing conclusions or acting on it."
+        : "本条 AI 分析暂不可用，形成判断或采取行动前请先核验标题所链接的原始来源。",
+      importance: 1,
+      tags: [REPORT_LOCALE === "en" ? "Information limited" : "信息有限"],
+      coverageCountries: [],
+      interestMatches: [],
+    };
+  });
 }
 
 export function canPublishLimitedCircuitEdition(input: {
@@ -81,6 +101,48 @@ export function canPublishLimitedCircuitEdition(input: {
     && input.sourceFallbackArticles > 0
     && !input.hasHighRiskContent
     && !input.hasDisallowedReviewRisk;
+}
+
+export type PublicationGateInput = {
+  aiTargetArticles: number;
+  aiEnrichedArticles: number;
+  aiEnrichedCategories: string[];
+  requiredCategories: string[];
+  minimumCoverage: number;
+  reviewState: "passed" | "failed" | "unavailable";
+  blockingScope: "none" | "items" | "systemic";
+};
+
+/**
+ * Source-only fallbacks are useful for diagnostics, but never count as AI
+ * enrichment. Keep this policy pure so the scheduled job and regression tests
+ * share the exact same publication decision.
+ */
+export function evaluatePublicationGate(input: PublicationGateInput): string[] {
+  const reasons: string[] = [];
+  const coverage = input.aiTargetArticles === 0
+    ? 0
+    : input.aiEnrichedArticles / input.aiTargetArticles;
+  if (input.aiTargetArticles > 0 && input.aiEnrichedArticles === 0) {
+    reasons.push("AI_ENRICHMENT_EMPTY");
+  }
+  if (input.aiTargetArticles > 0 && coverage < input.minimumCoverage) {
+    reasons.push("AI_ENRICHMENT_COVERAGE");
+  }
+  const enrichedCategories = new Set(input.aiEnrichedCategories);
+  const missingRequired = input.requiredCategories.filter((category) => !enrichedCategories.has(category));
+  if (missingRequired.length > 0) {
+    reasons.push(`REQUIRED_AI_CATEGORY_MISSING:${missingRequired.join(",")}`);
+  }
+  if (input.reviewState === "failed" && input.blockingScope === "systemic") {
+    reasons.push("SYSTEMIC_QUALITY_REVIEW");
+  }
+  return reasons;
+}
+
+export function hasUsableAiEnrichment(article: Pick<ArticleInput, "displayTitle" | "summary" | "aiAnalysis">): boolean {
+  return Boolean(article.displayTitle && article.summary && article.aiAnalysis)
+    && !/AI 分析暂不可用|AI analysis is unavailable/i.test(article.aiAnalysis ?? "");
 }
 
 export function createReviewUnavailableFallback(articles: ArticleInput[]): DailyReport {

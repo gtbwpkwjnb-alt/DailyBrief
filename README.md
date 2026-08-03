@@ -113,7 +113,7 @@
    - `LLM_BASE_URL` —— 自定义 endpoint。**选了上面"中转站"那行的话必填**；本地 Ollama 填 `http://localhost:11434/v1`、LM Studio 填 `http://localhost:1234/v1`
    - `REPORT_LOCALE` —— `zh`（默认）或 `en`，控制数据源 + UI + prompt 全套切英文
    - `REPORT_TZ` —— IANA 时区名（默认 UTC），例 `Asia/Shanghai` / `America/Los_Angeles`。**同时影响触发时间和日期标签**
-   - `REPORT_HOUR` —— 触发的小时（基于 `REPORT_TZ`），默认 `6,18`（早 6 点 + 晚 6 点）。逗号分隔可多次触发
+   - `REPORT_HOUR` —— 触发的小时（基于 `REPORT_TZ`），默认 `6,18`（早 6:00 + 晚 18:30；晚间分钟由工作流 cron 固定为 30）。逗号分隔可多次触发
    - `REPORT_DAYS` —— 触发的星期（cron 风格，`0`=周日 ... `6`=周六），默认 `*`（每天）。例 `1-5` = 工作日；`1,3,5` = 周一三五
    - `REPORT_FRESHNESS_HOURS` —— 带发布时间内容的滚动新鲜度窗口，默认 `72` 小时；普通源缺少发布时间时不进入日报
    - `MIN_FRESH_ARTICLES` —— 新鲜内容发布门禁，默认至少 `20` 条，否则本次生成失败且不覆盖线上日报
@@ -121,20 +121,20 @@
    - `READER_FETCH_LIMIT` —— 每个阅读器栏目获取文章上限，默认 `30`
 6. **Actions 标签 → 选 "Daily Brief" workflow → Run workflow** 手动触发一次
 
-跑完后报告在 `https://<你的用户名>.github.io/<repo-名字>/`。之后**默认每天 `REPORT_TZ` 时区的 06:00 和 18:00 自动更新**（不设 `REPORT_TZ` 就是 UTC 06:00 和 18:00）。
+跑完后报告在 `https://<你的用户名>.github.io/<repo-名字>/`。之后**默认每天 `REPORT_TZ` 时区的 06:00 和 18:30 自动更新**（不设 `REPORT_TZ` 就是 UTC 06:00 和 18:30）。
 
-> ⏰ **触发机制**：GitHub Actions 的 cron 只接受 UTC，工作流在目标时段各探测两次，里面有一个 `gate` 任务用 `REPORT_TZ` 把当前小时和 `REPORT_HOUR/REPORT_DAYS` 对照——匹配才往下跑 build，否则秒退。这样不论你在哪个时区都能精准命中本地时间，**夏令时也自动跟着切换**（IANA 时区数据库内置）。
+> ⏰ **触发机制**：GitHub Actions 的 cron 只接受 UTC，工作流在 UTC 22:00（本地 06:00）和 UTC 10:30（本地 18:30）触发；`gate` 任务用 `REPORT_TZ` 把当前小时和 `REPORT_HOUR/REPORT_DAYS` 对照，匹配才往下跑 build，否则秒退。GitHub 调度若延迟，catchup 门禁会在当日报告缺失时恢复执行；夏令时仍由 IANA 时区数据库处理。
 
 **常用 schedule 配方：**
 
 | 想要 | `REPORT_HOUR` | `REPORT_DAYS` |
 |---|---|---|
-| 每天早晚两次（6 + 18 点，默认） | 不填或 `6,18` | 不填或 `*` |
+| 每天早晚两次（06:00 + 18:30，默认） | 不填或 `6,18` | 不填或 `*` |
 | 工作日 09:00 | `9` | `1-5` |
 | 周一/三/五 早 7 晚 9 两次 | `7,21` | `1,3,5` |
 | 每 6 小时一次 | `0,6,12,18` | `*` |
 
-只想要默认每天 06:00 和 18:00 本地时间，**只填 `REPORT_TZ` 一个变量就够了**（如 `Asia/Shanghai`），其他全部留空。
+只想要默认每天 06:00 和 18:30 本地时间，**只填 `REPORT_TZ` 一个变量就够了**（如 `Asia/Shanghai`），其他全部留空。
 
 **💸 成本估算**：GitHub Actions 公开 repo 完全免费。Pages 公开 repo 也免费。唯一花钱的就是 LLM API 调用——DeepSeek 月成本不到 $1，Anthropic Sonnet < $2。
 
@@ -146,7 +146,7 @@
 - **Variable name 报 "alphanumeric only"** —— 输入 `LLM_BACKEND` 时下划线被中文输入法替换成了全角 `＿`（U+FF3F）。切到英文输入法 Shift+`-` 重打
 - **第一次跑完才能选 Pages source** —— Pages 设置页要求选已存在的分支，但 `gh-pages` 是首次 workflow 跑成功后才创建出来。顺序：配 secret → 触发 workflow → 跑完 → 回 Settings → Pages 选 `gh-pages`
 - **Action 红 X 怎么看具体原因** —— 点失败的 build → 左边列出每个 step → 找有红 X 的那步点开看 log。最常见两类：`401/402` = API key 拼错或没余额；`403` = workflow permissions 没设成 Read and write
-- **自动触发只跑了 `gate`，后面的 build 被 skipped** —— 这是调度门禁在工作，不一定是失败。点开那次 run → `gate` → `Check schedule`，看 `Now in ...`、`Configured REPORT_HOUR=...` 和 `No match — skipping (...)`。最常见原因是没在 **Repository Variables** 里设置 `REPORT_TZ=Asia/Shanghai`，此时默认按 UTC 06:00/18:00 触发（北京时间需按实际时区变量解释）。如果变量放在 **Settings → Environments** 里，默认 workflow 也读不到；请移到 **Settings → Secrets and variables → Actions → Variables**，或给 `gate` / `build` 两个 job 都加同一个 `environment: <name>`
+- **自动触发只跑了 `gate`，后面的 build 被 skipped** —— 这是调度门禁在工作，不一定是失败。点开那次 run → `gate` → `Check schedule`，看 `Now in ...`、`Configured REPORT_HOUR=...` 和 `No match — skipping (...)`。最常见原因是没在 **Repository Variables** 里设置 `REPORT_TZ=Asia/Shanghai`，此时默认按 UTC 06:00/18:30 触发（北京时间需按实际时区变量解释）。如果变量放在 **Settings → Environments** 里，默认 workflow 也读不到；请移到 **Settings → Secrets and variables → Actions → Variables**，或给 `gate` / `build` 两个 job 都加同一个 `environment: <name>`
 - **报错 `ANTHROPIC_API_KEY (or generic LLM_API_KEY) is required`，但我填的是别家的 key** —— 经典 secret/variable 不配对。Workflow 默认 `LLM_BACKEND=anthropic`，光填 `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 不够，**必须同时去 Variables 标签加 `LLM_BACKEND=deepseek` / `openai`**。从 v1.x 起启动期会直接告诉你哪个 key 已设、应该把 `LLM_BACKEND` 改成什么
 - **配齐了 secret + variable 还是报同样的错** —— 99% 是配置放错了作用域。GitHub 上有两个长得几乎一样的页面：
   - ✅ **Settings → Secrets and variables → Actions**（页眉是 "Repository secrets" / "Repository variables"）—— 本项目默认走这里
@@ -257,11 +257,11 @@ node scripts/install.mjs --global
 | `npm run network:check` | 检查外网与可选代理连通性，不调用 LLM | ~5 秒 |
 | `npm run check` | 类型检查、源配置校验与单元测试 | 即时 |
 
-运行结果会在当日目录写入 `source-health.json`，包含来源、Provider、栏目成功率与非空产出率。默认低于 60% 来源成功率，或最终可见条目的本地化标题/摘要覆盖不足 100% 时不发布；可通过 `.env.local` 的 `SOURCE_*` 与 `MIN_ENRICHMENT_COVERAGE` 配置。
+运行结果会在当日目录写入 `source-health.json`，包含来源、Provider、栏目成功率与非空产出率。默认低于 60% 来源成功率、真实 AI 精炼覆盖率低于 70%、或质量审核判定为系统性失败时不发布；单个栏目失败会被屏蔽并继续输出其它栏目，来源原文降级不计入 AI 覆盖率。可通过 `.env.local` 的 `SOURCE_*`、`MIN_ENRICHMENT_COVERAGE` 与 `REQUIRED_AI_ENRICHMENT_CATEGORIES` 配置。
 
 本地执行 `npm run serve` 后，报告页的运行按钮可直接启动日报，并实时显示网络预检、来源抓取、翻译精炼、质量审核和写入进度。页面会显示本次抓取来源数、原始/去重信息数、来源成功率、AI 筛选规则和增量关键词。最近一次运行距当前不足 5 小时时，按钮会复用已去重缓存，只重做增量筛选；超过 5 小时才重新抓取来源。GitHub Pages 上的按钮不会跳转页面：若未配置安全的 `DAILY_RUN_ENDPOINT`，会直接显示启动失败；远端公开 Actions 状态仍会显示在进度栏中。不要把 GitHub Token 写入 HTML。
 
-若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这两类诊断 artifact 14 天。
+若本机网络需要代理，可在 `.env.local` 设置标准 `HTTPS_PROXY`、`HTTP_PROXY` 或 `ALL_PROXY`。每日任务会先探测 GitHub 与 Hacker News 两个端点，并在门禁判断前写入 `logs/daily-<date>.log`、`logs/llm-calls.jsonl` 和 `source-health.json`；GitHub Actions 无论成功或失败都会保留这些诊断 artifact 14 天。AI 精炼默认每批最多 4 条、栏目并发 2；遇到 `finish_reason=length` 会立即拆分批次，只重试失败条目。
 
 ---
 
@@ -672,26 +672,26 @@ The registry currently contains 83 sources, with 61 enabled by default. After lo
    - `LLM_BASE_URL` — custom endpoint. **Required if you picked the "proxy" row above.** For local Ollama use `http://localhost:11434/v1`, LM Studio `http://localhost:1234/v1`
    - `REPORT_LOCALE` — `zh` (default) or `en` — switches sources + UI + LLM prompts as a set
    - `REPORT_TZ` — IANA timezone name (default UTC); e.g. `Asia/Shanghai` / `America/Los_Angeles`. **Drives both the trigger time and the date label.**
-   - `REPORT_HOUR` — hour(s) to fire in `REPORT_TZ`, default `6,18` (06:00 and 18:00). Comma-separated for multiple
+   - `REPORT_HOUR` — hour(s) to fire in `REPORT_TZ`, default `6,18` (06:00 and 18:30; evening minute is fixed at 30 by cron). Comma-separated for multiple
    - `REPORT_DAYS` — day-of-week filter (cron-style, `0`=Sunday ... `6`=Saturday), default `*` (every day). E.g. `1-5` = weekdays; `1,3,5` = Mon/Wed/Fri
    - `REPORT_FRESHNESS_HOURS` — rolling freshness window for dated content, default `72` hours; ordinary sources without timestamps are excluded
    - `MIN_FRESH_ARTICLES` — publication gate, default `20`; a smaller fresh set fails without replacing the published report
 6. **Actions tab → "Daily Brief" workflow → Run workflow** to trigger manually for the first time
 
-Once the workflow turns green, your report lives at `https://<your-username>.github.io/<repo-name>/`. After that, **it refreshes daily at 06:00 and 18:00 in `REPORT_TZ`** (or 06:00 and 18:00 UTC if `REPORT_TZ` is unset).
+Once the workflow turns green, your report lives at `https://<your-username>.github.io/<repo-name>/`. After that, **it refreshes daily at 06:00 and 18:30 in `REPORT_TZ`** (or 06:00 and 18:30 UTC if `REPORT_TZ` is unset).
 
-> ⏰ **How the schedule works**: GitHub Actions cron is UTC-only, so the workflow probes **twice during each target hour** and uses a `gate` job to check if the current hour in `REPORT_TZ` matches `REPORT_HOUR` / `REPORT_DAYS`. If so, the build job proceeds; otherwise it exits in seconds. This lets the schedule track any local timezone precisely, and **handles DST transitions automatically** (via the IANA tz database).
+> ⏰ **How the schedule works**: GitHub Actions cron is UTC-only, so the workflow triggers at UTC 22:00 (local 06:00) and UTC 10:30 (local 18:30). A `gate` job checks whether the current hour in `REPORT_TZ` matches `REPORT_HOUR` / `REPORT_DAYS`; delayed events can use the catchup path when today's report is missing. This keeps the schedule aligned with the configured timezone and handles DST transitions through the IANA timezone database.
 
 **Common schedule recipes:**
 
 | You want | `REPORT_HOUR` | `REPORT_DAYS` |
 |---|---|---|
-| Twice daily (6 AM + 6 PM, default) | unset or `6,18` | unset or `*` |
+| Twice daily (6 AM + 6:30 PM, default) | unset or `6,18` | unset or `*` |
 | Weekdays at 09:00 | `9` | `1-5` |
 | Mon/Wed/Fri at 7 AM + 9 PM | `7,21` | `1,3,5` |
 | Every 6 hours | `0,6,12,18` | `*` |
 
-If you just want the default (06:00 and 18:00 local daily), **set only `REPORT_TZ`** (e.g. `Asia/Shanghai`) and leave the rest at defaults.
+If you just want the default (06:00 and 18:30 local daily), **set only `REPORT_TZ`** (e.g. `Asia/Shanghai`) and leave the rest at defaults.
 
 **💸 Cost summary**: GitHub Actions on public repos is free. Pages on public repos is free. The only thing you pay for is LLM API calls — DeepSeek runs under $1/month, Anthropic Sonnet under $2.
 
@@ -703,7 +703,7 @@ If you just want the default (06:00 and 18:00 local daily), **set only `REPORT_T
 - **"Variable name can only contain alphanumeric characters"** — most likely the underscore in `LLM_BACKEND` got autocorrected by a CJK input method to a full-width `＿` (U+FF3F). Switch to English input, retype Shift+`-`, or copy-paste.
 - **Pages source dropdown doesn't show `gh-pages`** — that branch only exists after the first successful workflow run. Order: configure secret → trigger workflow → wait for green → go back to Settings → Pages.
 - **Where to read a failed run** — Actions tab → click the red X → left sidebar lists each step → click the failing one to expand its log. Most common causes: `401`/`402` (API key wrong or out of credit), `403` (workflow permissions still set to "Read only").
-- **Scheduled runs only execute `gate`, then build is skipped** — this is the schedule gate doing its job, not necessarily a failure. Open that run → `gate` → `Check schedule`, then inspect `Now in ...`, `Configured REPORT_HOUR=...`, and `No match — skipping (...)`. The most common cause is missing `REPORT_TZ=Asia/Shanghai` in **Repository Variables**, so the default is UTC 06:00/18:00. Variables stored under **Settings → Environments** are invisible to the default workflow; move them to **Settings → Secrets and variables → Actions → Variables**, or add the same `environment: <name>` to both the `gate` and `build` jobs.
+- **Scheduled runs only execute `gate`, then build is skipped** — this is the schedule gate doing its job, not necessarily a failure. Open that run → `gate` → `Check schedule`, then inspect `Now in ...`, `Configured REPORT_HOUR=...`, and `No match — skipping (...)`. The most common cause is missing `REPORT_TZ=Asia/Shanghai` in **Repository Variables**, so the default is UTC 06:00/18:30. Variables stored under **Settings → Environments** are invisible to the default workflow; move them to **Settings → Secrets and variables → Actions → Variables**, or add the same `environment: <name>` to both the `gate` and `build` jobs.
 - **Error: `ANTHROPIC_API_KEY (or generic LLM_API_KEY) is required` — but I set a different provider's key** — classic secret-without-variable mismatch. The workflow defaults `LLM_BACKEND=anthropic`; setting `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` alone is not enough — you **also need to add the matching `LLM_BACKEND=deepseek` / `openai` under Variables**. As of v1.x the startup check prints exactly which key it found and which `LLM_BACKEND` value to set.
 - **I added both the secret and variable, still the same error** — 99% sure your values went into the wrong scope. GitHub has two near-identical-looking pages:
   - ✅ **Settings → Secrets and variables → Actions** (header reads "Repository secrets" / "Repository variables") — this is the default this project uses
