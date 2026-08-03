@@ -644,6 +644,30 @@ test("reviewer outage is never reported as a passed review", async () => {
   assert.deepEqual(result.failureCodes, ["AI_REVIEW_UNAVAILABLE"]);
 });
 
+test("reviewer retries output-limited responses with compact input", async () => {
+  const prompts: string[] = [];
+  const result = await aiReview("full review sample", async (request) => {
+    prompts.push(request.userPrompt);
+    if (prompts.length < 3) throw new Error("LLM_OUTPUT_LIMIT finish_reason=length");
+    return {
+      text: JSON.stringify({
+        passed: true,
+        summary: "Review passed.",
+        issues: [],
+        suggestions: [],
+        blockingScope: "none",
+        blockingItems: [],
+      }),
+    } as never;
+  }, "compact review sample");
+
+  assert.equal(result.passed, true);
+  assert.equal(prompts.length, 3);
+  assert.match(prompts[0]!, /full review sample/);
+  assert.match(prompts[1]!, /compact review sample/);
+  assert.match(prompts[2]!, /compact review sample/);
+});
+
 test("structured item-level review blockers can be resolved to exact reviewed URLs", async () => {
   const result = await aiReview("test", async () => ({
     text: JSON.stringify({
