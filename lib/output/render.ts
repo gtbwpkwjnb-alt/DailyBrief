@@ -282,6 +282,10 @@ export type RunStats = {
   enrichmentVersion?: number;
   suppressedArticles?: number;
   sourceFallbackArticles?: number;
+  aiTargetArticles?: number;
+  sourceFallbackCandidateArticles?: number;
+  sourceFallbackSecondaryFilteredArticles?: number;
+  finalPublishedArticles?: number;
   enrichmentCircuitOpen?: boolean;
   enrichmentStopReason?: "budget" | "empty_response";
   freshnessWindowHours?: number;
@@ -1120,10 +1124,19 @@ export function renderHtml(
 	    politics: sumItems(raw.politics),
 	  };
   const totalStreamItems = counts.personalized + counts.trending + counts.tech + counts.politics + counts.finance;
-  const initialCategory = counts.personalized > 0 ? "personalized" : (raw.trending.length > 0 ? "trending" : "tech");
-  const initialCategoryLabel = counts.personalized > 0
-    ? (REPORT_LOCALE === "en" ? "Personalized" : "用户个性化")
-    : (raw.trending.length > 0 ? STR.catTrending : CATEGORY_LABELS.tech);
+  type StreamCategory = Category | "personalized";
+  const visibleCategories = (Object.entries(counts) as Array<[StreamCategory, number]>)
+    .filter(([, count]) => count > 0)
+    .map(([category]) => category);
+  const initialCategory = visibleCategories[0] ?? "tech";
+  const categoryLabels: Record<StreamCategory, string> = {
+    personalized: REPORT_LOCALE === "en" ? "Personalized" : "用户个性化",
+    trending: STR.catTrending,
+    tech: CATEGORY_LABELS.tech,
+    politics: CATEGORY_LABELS.politics,
+    finance: CATEGORY_LABELS.finance,
+  };
+  const initialCategoryLabel = categoryLabels[initialCategory];
   const visibleStreamArticles = (Object.keys(raw) as Category[]).flatMap((category) =>
     raw[category].flatMap((sub) => sub.sources.flatMap((source) => source.items)),
   );
@@ -1138,14 +1151,10 @@ export function renderHtml(
     ? runStats.successfulSources
     : renderedSourceCount > 0 ? renderedSourceCount : undefined;
   const editionStats = `${totalStreamItems} ${REPORT_LOCALE === "en" ? "items" : "条信息"}${sourceCount === undefined ? "" : ` · ${sourceCount} ${REPORT_LOCALE === "en" ? "sources" : "个来源"}`}`;
-  const tagCloudHtml = renderTagCloud(buildTagCloud(raw));
   const isPublicReader = process.env.WEB_MODE === "true";
   const qualitySummary = review?.summary || (REPORT_LOCALE === "en"
     ? "Automated quality review details were not recorded for this edition."
     : "本期未记录自动质量审核详情，请结合来源成功率和新鲜度指标阅读。");
-  const qualityState = review
-    ? (review.passed ? (REPORT_LOCALE === "en" ? "Sample passed" : "抽检通过") : (REPORT_LOCALE === "en" ? "Sample needs review" : "抽检需复核"))
-    : (REPORT_LOCALE === "en" ? "Not recorded" : "未记录");
   const fetchedArticleCount = runStats?.fetchedArticles ?? totalStreamItems;
   const dedupedArticleCount = runStats?.dedupedArticles ?? fetchedArticleCount;
   const eligibleArticleCount = runStats?.freshArticles ?? totalStreamItems;
@@ -1156,6 +1165,19 @@ export function renderHtml(
     ?? visibleStreamArticles.filter((article) => article.displayTitle && article.summary).length;
   const suppressedArticleCount = runStats?.suppressedArticles ?? 0;
   const sourceFallbackArticleCount = runStats?.sourceFallbackArticles ?? 0;
+  const isSourceOnlyLimitedEdition = displayedArticleCount > 0
+    && aiEnrichedArticleCount === 0
+    && sourceFallbackArticleCount > 0;
+  const qualityState = isSourceOnlyLimitedEdition
+    ? (REPORT_LOCALE === "en" ? "Limited source edition" : "信息有限版")
+    : review
+      ? (review.passed ? (REPORT_LOCALE === "en" ? "Sample passed" : "抽检通过") : (REPORT_LOCALE === "en" ? "Below publication threshold" : "未通过质量门槛"))
+      : (REPORT_LOCALE === "en" ? "Not recorded" : "未记录");
+  const tagEntries = buildTagCloud(raw);
+  const tagCloudHtml = aiEnrichedArticleCount > 0
+    && tagEntries.some(({ tag }) => !/^信息有限$/u.test(tag.trim()))
+    ? renderTagCloud(tagEntries)
+    : "";
   const enrichmentStopText = runStats?.enrichmentStopReason === "budget"
     ? (REPORT_LOCALE === "en" ? "; AI budget exhausted" : " · AI 预算耗尽")
     : runStats?.enrichmentStopReason === "empty_response"
@@ -1178,14 +1200,23 @@ export function renderHtml(
   const sourceSuccessDetail = runStats
     ? `${runStats.successfulSources}/${runStats.fetchedSources} · ${(runStats.sourceSuccessRate * 100).toFixed(1)}%`
     : (REPORT_LOCALE === "en" ? "Not recorded" : "未记录");
-  const qualityAnalysisHtml = `<section class="edition-quality" data-testid="edition-quality">
-    <div class="edition-quality-head"><h2>${REPORT_LOCALE === "en" ? "Current edition quality analysis" : "当前日报质量分析"}</h2><span class="quality-state${review?.passed ? " passed" : ""}">${qualityState}</span></div>
+  const fallbackCandidateCount = runStats?.sourceFallbackCandidateArticles ?? sourceFallbackArticleCount;
+  const fallbackSecondaryFilteredCount = runStats?.sourceFallbackSecondaryFilteredArticles ?? Math.max(0, fallbackCandidateCount - sourceFallbackArticleCount);
+  const finalPublishedCount = runStats?.finalPublishedArticles ?? displayedArticleCount;
+  const fallbackChainText = isSourceOnlyLimitedEdition || fallbackCandidateCount > 0
+    ? (REPORT_LOCALE === "en"
+      ? `AI target ${runStats?.aiTargetArticles ?? adaptiveTargetCount ?? displayedArticleCount}; fallback candidates ${fallbackCandidateCount}; secondary filtered ${fallbackSecondaryFilteredCount}; final published ${finalPublishedCount}`
+      : `AI 目标 ${runStats?.aiTargetArticles ?? adaptiveTargetCount ?? displayedArticleCount} 条 · 降级候选 ${fallbackCandidateCount} 条 · 二次筛除 ${fallbackSecondaryFilteredCount} 条 · 最终发布 ${finalPublishedCount} 条`)
+    : "";
+  const qualityAnalysisHtml = `<section class="edition-quality${isSourceOnlyLimitedEdition || review?.passed === false ? " limited-edition" : ""}" data-testid="edition-quality">
+    <div class="edition-quality-head"><h2 class="sr-only">${REPORT_LOCALE === "en" ? "Current edition quality analysis" : "当前日报质量分析"}</h2><span class="quality-state${review?.passed && !isSourceOnlyLimitedEdition ? " passed" : ""}">${qualityState}</span></div>
     <p>${escapeHtml(qualitySummary)}</p>
     <dl class="quality-pipeline">
       <div class="quality-stage"><span class="quality-stage-index">1</span><div><dt>${REPORT_LOCALE === "en" ? "Fetched" : "抓取入库"}</dt><dd>${fetchedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? "Sources succeeded" : "来源成功"} ${sourceSuccessDetail}</p></div></div>
       <div class="quality-stage"><span class="quality-stage-index">2</span><div><dt>${REPORT_LOCALE === "en" ? "Eligible pool" : "初筛候选"}</dt><dd>${eligibleArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${selectionDetail}</p></div></div>
       <div class="quality-stage"><span class="quality-stage-index">3</span><div><dt>${REPORT_LOCALE === "en" ? "Displayed selection" : "前端精选"}</dt><dd>${displayedArticleCount} ${REPORT_LOCALE === "en" ? "items" : "条"}</dd><p>${REPORT_LOCALE === "en" ? `Public ${publicDisplayedArticleCount} + personalized incremental ${personalizedArticleCount}; AI-enriched ${aiEnrichedArticleCount}/${displayedArticleCount}${sourceFallbackArticleCount ? `; source-only fallback ${sourceFallbackArticleCount}` : ""}${suppressedArticleCount ? `; suppressed ${suppressedArticleCount}` : ""}${enrichmentStopText}` : `公共精选 ${publicDisplayedArticleCount} 条 + 个性化增量 ${personalizedArticleCount} 条 · AI 精炼 ${aiEnrichedArticleCount}/${displayedArticleCount}${sourceFallbackArticleCount ? ` · 来源原文降级 ${sourceFallbackArticleCount} 条` : ""}${suppressedArticleCount ? ` · 已屏蔽 ${suppressedArticleCount} 条` : ""}${enrichmentStopText}`}</p></div></div>
     </dl>
+    ${fallbackChainText ? `<p class="quality-fallback-chain">${fallbackChainText}</p>` : ""}
     <p class="quality-scope-note">${REPORT_LOCALE === "en" ? "AI enrichment applies to displayed items. The publication quality review is a category sample, not full factual verification." : "AI 逐条精炼只覆盖前端精选内容；发布前质量审核为分栏抽检，不代表对全部候选逐条事实核验。"}</p>
   </section>`;
   const readerToolsHtml = `<section class="reader-tools" data-testid="reader-tools">
@@ -1203,7 +1234,7 @@ export function renderHtml(
       <p id="readerKeywordScope" class="reader-keyword-scope">${REPORT_LOCALE === "en" ? "Scope: eligible candidate pool. The public selection is unchanged." : "作用范围：初筛候选池；公共精选不受影响。"}</p>
     </form>
   </section>`;
-  const reviewDetailsHtml = reviewHtml(review);
+  const reviewDetailsHtml = isSourceOnlyLimitedEdition || review?.passed === false ? "" : reviewHtml(review);
 
   return `<!doctype html>
 <html lang="${REPORT_LOCALE === "en" ? "en" : "zh-CN"}">
@@ -1703,6 +1734,7 @@ export function renderHtml(
   .article-source-list a { color: var(--link); overflow-wrap: anywhere; text-underline-offset: 0.15rem; }
   .article-revision { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.65rem; }
   .edition-quality { margin: 0.75rem 0 0; padding: 0.75rem 0; border-bottom: 1px solid var(--rule); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .edition-quality-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
   .edition-quality h2, .selection-principles h2 { margin: 0; font-size: 0.82rem; }
   .edition-quality > p { margin: 0.4rem 0 0; color: var(--fg-soft); font-size: 0.72rem; line-height: 1.6; }
@@ -1715,8 +1747,11 @@ export function renderHtml(
   .edition-quality dd { margin: 0.05rem 0 0; color: var(--fg); font-size: 0.84rem; font-weight: 800; }
   .quality-stage p { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.62rem; line-height: 1.45; }
   .edition-quality .quality-scope-note { margin-top: 0.65rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); font-size: 0.64rem; }
+  .edition-quality .quality-fallback-chain { margin-top: 0.65rem; padding: 0.55rem 0.65rem; border-left: 3px solid #b42318; background: #fff2f0; color: #7a271a; font-weight: 700; }
   .quality-state { flex: 0 0 auto; color: #8a5a00; font-size: 0.66rem; font-weight: 700; }
   .quality-state.passed { color: #176b45; }
+  .limited-edition { border: 1px solid #f1b7ae; border-left: 4px solid #b42318; padding: 0.7rem; background: #fff8f7; }
+  .limited-edition .quality-state { color: #b42318; font-size: 0.74rem; }
   .reader-tools { padding: 0.2rem 0 0.8rem; }
   .principle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.55rem; }
   .principle-grid > div { padding: 0.65rem 0.7rem; border-left: 3px solid var(--section-accent); background: color-mix(in srgb, var(--bg-elevated) 88%, var(--section-wash)); }
@@ -3116,10 +3151,10 @@ export function renderHtml(
   <aside class="stream-navigation">
   <nav class="tabs" aria-label="${REPORT_LOCALE === "en" ? "Section navigation" : "栏目定位"}">
     ${counts.personalized > 0 ? `<button class="tab active" type="button" data-scroll-target="${streamAnchor("category", "personalized")}" data-tab="personalized">${REPORT_LOCALE === "en" ? "Personalized" : "用户个性化"}<span class="count">${counts.personalized}</span></button>` : ""}
-    ${raw.trending.length > 0 ? `<button class="tab${counts.personalized > 0 ? "" : " active"}" type="button" data-scroll-target="${streamAnchor("category", "trending")}" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
-    <button class="tab${counts.personalized === 0 && raw.trending.length === 0 ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("category", "tech")}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>
-    <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "politics")}" data-tab="politics">${CATEGORY_LABELS.politics}<span class="count">${counts.politics}</span></button>
-    <button class="tab" type="button" data-scroll-target="${streamAnchor("category", "finance")}" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>
+    ${counts.trending > 0 ? `<button class="tab${initialCategory === "trending" ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("category", "trending")}" data-tab="trending">${STR.catTrending}<span class="count">${counts.trending}</span></button>` : ""}
+    ${counts.tech > 0 ? `<button class="tab${initialCategory === "tech" ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("category", "tech")}" data-tab="tech">${CATEGORY_LABELS.tech}<span class="count">${counts.tech}</span></button>` : ""}
+    ${counts.politics > 0 ? `<button class="tab${initialCategory === "politics" ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("category", "politics")}" data-tab="politics">${CATEGORY_LABELS.politics}<span class="count">${counts.politics}</span></button>` : ""}
+    ${counts.finance > 0 ? `<button class="tab${initialCategory === "finance" ? " active" : ""}" type="button" data-scroll-target="${streamAnchor("category", "finance")}" data-tab="finance">${CATEGORY_LABELS.finance}<span class="count">${counts.finance}</span></button>` : ""}
   </nav>
   <div class="mobile-context-navigation" id="mobileContextNavigation">
     <nav id="mobileSubTabs" aria-label="${REPORT_LOCALE === "en" ? "Current section shortcuts" : "当前二级栏目定位"}"></nav>
@@ -3138,22 +3173,22 @@ export function renderHtml(
     <header class="stream-category-heading"><h2>${REPORT_LOCALE === "en" ? "Personalized" : "用户个性化"}</h2><span>${counts.personalized}</span></header>
     ${renderPersonalizedPanel(personalizedArticles)}
   </section>` : ""}
-  <section class="panel stream-section active" id="${streamAnchor("category", "trending")}" data-panel="trending" data-category-label="${escapeHtml(STR.catTrending)}">
+  ${counts.trending > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "trending")}" data-panel="trending" data-category-label="${escapeHtml(STR.catTrending)}">
     <header class="stream-category-heading"><h2>${STR.catTrending}</h2><span>${counts.trending}</span></header>
     ${renderRawCategoryPanel("trending", raw.trending, "trending", categorySummaries)}
-  </section>
-  <section class="panel stream-section active" id="${streamAnchor("category", "tech")}" data-panel="tech" data-category-label="${escapeHtml(CATEGORY_LABELS.tech)}">
+  </section>` : ""}
+  ${counts.tech > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "tech")}" data-panel="tech" data-category-label="${escapeHtml(CATEGORY_LABELS.tech)}">
     <header class="stream-category-heading"><h2>${CATEGORY_LABELS.tech}</h2><span>${counts.tech}</span></header>
     ${renderRawCategoryPanel("tech", techMainSubs, "tech", categorySummaries)}
-  </section>
-  <section class="panel stream-section active" id="${streamAnchor("category", "politics")}" data-panel="politics" data-category-label="${escapeHtml(CATEGORY_LABELS.politics)}">
+  </section>` : ""}
+  ${counts.politics > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "politics")}" data-panel="politics" data-category-label="${escapeHtml(CATEGORY_LABELS.politics)}">
     <header class="stream-category-heading"><h2>${CATEGORY_LABELS.politics}</h2><span>${counts.politics}</span></header>
     ${renderRawCategoryPanel("politics", raw.politics, "politics", categorySummaries)}
-  </section>
-  <section class="panel stream-section active" id="${streamAnchor("category", "finance")}" data-panel="finance" data-category-label="${escapeHtml(CATEGORY_LABELS.finance)}">
+  </section>` : ""}
+  ${counts.finance > 0 ? `<section class="panel stream-section active" id="${streamAnchor("category", "finance")}" data-panel="finance" data-category-label="${escapeHtml(CATEGORY_LABELS.finance)}">
     <header class="stream-category-heading"><h2>${CATEGORY_LABELS.finance}</h2><span>${counts.finance}</span></header>
     ${renderRawCategoryPanel("finance", raw.finance, "finance", categorySummaries)}
-  </section>
+  </section>` : ""}
   <div class="stream-loader" id="streamLoader" aria-live="polite">${REPORT_LOCALE === "en" ? "Loading more" : "继续下滑，自动接入更多信息"}</div>
   </div>
   </div>
@@ -3517,8 +3552,8 @@ export function renderHtml(
   })();
 
   (function () {
-    var batchSize = 12;
     var articles = Array.from(document.querySelectorAll('.stream-feed .article'));
+    var batchSize = articles.length <= 24 ? Math.max(1, articles.length) : 12;
     var sections = Array.from(document.querySelectorAll('.stream-section'));
     var currentCategory = document.getElementById('currentCategory');
     var currentSubcategory = document.getElementById('currentSubcategory');

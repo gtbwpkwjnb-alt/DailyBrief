@@ -987,6 +987,8 @@ export type ConsolidatedEnrichOptions = {
 type EnrichmentBatchOptions = {
   maxItems?: number;
   maxChars?: number;
+  maxOutputChars?: number;
+  estimatedOutputCharsPerItem?: number;
 };
 
 function enrichmentInputSize(item: EnrichInput): number {
@@ -1005,20 +1007,29 @@ export function planEnrichmentBatches(
   items: EnrichInput[],
   options: EnrichmentBatchOptions = {},
 ): EnrichInput[][] {
-  const maxItems = Math.max(1, Math.floor(options.maxItems ?? 12));
+  const maxItems = Math.max(1, Math.floor(options.maxItems ?? 4));
   const maxChars = Math.max(1, Math.floor(options.maxChars ?? 7_200));
+  const maxOutputChars = Math.max(1, Math.floor(options.maxOutputChars ?? 4_800));
+  const estimatedOutputCharsPerItem = Math.max(1, Math.floor(options.estimatedOutputCharsPerItem ?? 1_200));
   const batches: EnrichInput[][] = [];
   let current: EnrichInput[] = [];
   let currentChars = 0;
+  let currentOutputChars = 0;
   for (const item of items) {
     const itemChars = enrichmentInputSize(item);
-    if (current.length > 0 && (current.length >= maxItems || currentChars + itemChars > maxChars)) {
+    if (current.length > 0 && (
+      current.length >= maxItems
+      || currentChars + itemChars > maxChars
+      || currentOutputChars + estimatedOutputCharsPerItem > maxOutputChars
+    )) {
       batches.push(current);
       current = [];
       currentChars = 0;
+      currentOutputChars = 0;
     }
     current.push(item);
     currentChars += itemChars;
+    currentOutputChars += estimatedOutputCharsPerItem;
   }
   if (current.length > 0) batches.push(current);
   return batches;
@@ -1064,9 +1075,16 @@ export async function consolidatedEnrich(
 
   // Use fewer calls for compact inputs while splitting verbose batches before
   // they approach provider input/output limits and trigger targeted repairs.
+  const maxItems = positiveNumber(process.env.AI_ENRICH_BATCH_MAX_ITEMS, 4);
+  const estimatedOutputCharsPerItem = positiveNumber(process.env.AI_ENRICH_ITEM_OUTPUT_CHARS, 1_200);
   const batches = planEnrichmentBatches(items, {
-    maxItems: positiveNumber(process.env.AI_ENRICH_BATCH_MAX_ITEMS, 12),
+    maxItems,
     maxChars: positiveNumber(process.env.AI_ENRICH_BATCH_CHAR_BUDGET, 7_200),
+    maxOutputChars: positiveNumber(
+      process.env.AI_ENRICH_BATCH_OUTPUT_CHAR_BUDGET,
+      maxItems * estimatedOutputCharsPerItem,
+    ),
+    estimatedOutputCharsPerItem,
   });
   if (batches.length > 1) {
     const batched = new Map<string, ConsolidatedEnrichment>();
@@ -1134,7 +1152,18 @@ export async function consolidatedEnrich(
       ));
       if (attempt > 1) console.log(`[enrich] consolidated "${categoryLabel}" targeted repair ${attempt}/${control.maxAttemptsPerUrl}: ${attemptItems.length} item(s)`);
     } catch (e) {
-      console.warn(`[enrich] consolidated "${categoryLabel}" attempt ${attempt}/${control.maxAttemptsPerUrl} failed: ${e instanceof Error ? e.message : String(e)}`);
+      const message = e instanceof Error ? e.message : String(e);
+      if (/LLM_OUTPUT_LIMIT/.test(message) && attemptItems.length > 1) {
+        const midpoint = Math.ceil(attemptItems.length / 2);
+        const childBatches = [attemptItems.slice(0, midpoint), attemptItems.slice(midpoint)];
+        console.warn(`[enrich] consolidated "${categoryLabel}" hit output limit for ${attemptItems.length} item(s); splitting into ${childBatches.map((batch) => batch.length).join("+")}`);
+        for (const childBatch of childBatches) {
+          if (childBatch.length === 0 || !canStartEnrichment(control)) break;
+          merge(await consolidatedEnrich(categoryLabel, childBatch, sharedOptions));
+        }
+        break;
+      }
+      console.warn(`[enrich] consolidated "${categoryLabel}" attempt ${attempt}/${control.maxAttemptsPerUrl} failed: ${message}`);
     }
   }
 
@@ -1205,7 +1234,9 @@ async function runConsolidatedOnce(
     ({ text } = await run({ systemPrompt, userPrompt, timeoutMs }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/LLM_EMPTY_RESPONSE|LLM_TRUNCATED_JSON|LLM_EMPTY_RESULT/.test(message)) {
+    const outputLimited = /LLM_OUTPUT_LIMIT/.test(message);
+    if (/LLM_EMPTY_RESPONSE|LLM_TRUNCATED_JSON|LLM_EMPTY_RESULT/.test(message)
+      || (outputLimited && items.length === 1)) {
       recordUnusableResponse(control);
     }
     throw error;

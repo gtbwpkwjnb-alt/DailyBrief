@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { ArticleInput } from "../ai/pipeline";
 import type { FilterProfile, RunStats } from "./render";
 
+export type PublicationRunStats = RunStats;
+
 const categorySchema = z.enum(["trending", "tech", "finance", "politics"]);
 const priorityLevelSchema = z.enum(["P0", "P1", "P2", "P3", "P4"]);
 const evidenceStateSchema = z.enum([
@@ -96,9 +98,13 @@ const runStatsSchema = z.object({
   displayedArticles: z.number().int().nonnegative().optional(),
   personalizedArticles: z.number().int().nonnegative().optional(),
   aiEnrichedArticles: z.number().int().nonnegative().optional(),
+  aiTargetArticles: z.number().int().nonnegative().optional(),
   enrichmentVersion: z.number().int().positive().optional(),
   suppressedArticles: z.number().int().nonnegative().optional(),
   sourceFallbackArticles: z.number().int().nonnegative().optional(),
+  sourceFallbackCandidateArticles: z.number().int().nonnegative().optional(),
+  sourceFallbackSecondaryFilteredArticles: z.number().int().nonnegative().optional(),
+  finalPublishedArticles: z.number().int().nonnegative().optional(),
   enrichmentCircuitOpen: z.boolean().optional(),
   enrichmentStopReason: z.enum(["budget", "empty_response"]).optional(),
   freshnessWindowHours: z.number().int().min(1).max(336).optional(),
@@ -138,7 +144,7 @@ export type ReportSidecar = {
   date: string;
   articles: ArticleInput[];
   failedSources: z.infer<typeof failedSourceSchema>[];
-  runStats?: RunStats;
+  runStats?: PublicationRunStats;
   filterProfile?: FilterProfile;
   qualityReview?: z.infer<typeof qualityReviewSchema>;
 };
