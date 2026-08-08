@@ -1,0 +1,86 @@
+{
+  "date": "2026-08-03",
+  "reviewedAt": "2026-08-03T13:58:29.901Z",
+  "publicationState": "eligible",
+  "reviewState": "passed",
+  "failureCodes": [],
+  "blockingScope": "items",
+  "blockingItems": [
+    {
+      "url": "https://www.cnv-medien.de/landkreis-cuxhaven/wingst/b73-nach-unfall-bei-wingst-voll-gesperrt-autofahrer-landet-mit-wagen-im-wassergraben.html",
+      "category": "trending",
+      "reason": "AI摘要包含“疑似酒后驾车”的无依据结论，原文摘录无任何相关证据。"
+    },
+    {
+      "url": "https://www.theguardian.com/world/live/2026/aug/03/europe-heatwave-wildfires-migration-ceuta-spain-latest-news-updates",
+      "category": "politics",
+      "reason": "AI摘要将“冯德莱恩呼吁加强边境管控”归因于冯德莱恩，原文摘录未提及该人物。"
+    }
+  ],
+  "recovery": {
+    "suppressedCount": 2,
+    "suppressedItems": [
+      {
+        "url": "https://www.cnv-medien.de/landkreis-cuxhaven/wingst/b73-nach-unfall-bei-wingst-voll-gesperrt-autofahrer-landet-mit-wagen-im-wassergraben.html",
+        "category": "trending",
+        "reason": "AI摘要包含“疑似酒后驾车”的无依据结论，原文摘录无任何相关证据。"
+      },
+      {
+        "url": "https://www.theguardian.com/world/live/2026/aug/03/europe-heatwave-wildfires-migration-ceuta-spain-latest-news-updates",
+        "category": "politics",
+        "reason": "AI摘要将“冯德莱恩呼吁加强边境管控”归因于冯德莱恩，原文摘录未提及该人物。"
+      }
+    ],
+    "originalFailureCodes": [
+      "AI_REVIEW_BLOCKED"
+    ]
+  },
+  "runStats": {
+    "fetchedSources": 60,
+    "successfulSources": 59,
+    "sourceSuccessRate": 0.9833333333333333,
+    "fetchedArticles": 1284,
+    "dedupedArticles": 1241,
+    "publicSelectionEligible": 600,
+    "publicSelectionLowInformationFiltered": 34,
+    "publicSelectionQualityFiltered": 9,
+    "publicSelectionEventMerged": 4,
+    "publicSelectionAdaptiveTarget": 59,
+    "publicSelectionExpansionArticles": 7,
+    "freshnessWindowHours": 72,
+    "freshArticles": 738,
+    "staleArticlesRejected": 473,
+    "undatedArticlesRejected": 30,
+    "futureArticlesRejected": 0,
+    "liveSnapshotArticles": 16,
+    "newestPublishedAt": "2026-08-03T13:52:27.750Z",
+    "generatedAt": "2026-08-03T13:58:29.888Z",
+    "mode": "fresh",
+    "enrichmentVersion": 4,
+    "sourceFallbackArticles": 0,
+    "enrichmentCircuitOpen": false,
+    "suppressedArticles": 5,
+    "displayedArticles": 44,
+    "personalizedArticles": 0,
+    "aiEnrichedArticles": 44,
+    "aiTargetArticles": 49,
+    "sourceFallbackCandidateArticles": 0,
+    "sourceFallbackSecondaryFilteredArticles": 0,
+    "finalPublishedArticles": 44
+  },
+  "issues": [
+    "热搜条目“b73”的AI摘要称“另有报道提及一名驾驶者疑似酒后驾车冲入沟渠”，但原文摘录中没有任何关于酒后驾车的证据，属于无依据的严重事实结论。",
+    "国际时政条目“罗马尼亚爆破多瑙河巨石”的AI摘要将“欧盟委员会主席冯德莱恩呼吁加强边境管控”写为事实，但原文摘录中未出现冯德莱恩，属于无依据的人物归属结论。",
+    "国际时政中关于Todd Blanche撤回反武器化基金的两条报道（BBC与Guardian）内容重复，未合并。",
+    "质量审核定位并屏蔽 2 条存在发布级事实风险的内容，其余信息继续发布。",
+    "热搜趋势屏蔽 3 条高风险、低信息或疑似乱码内容，已跳过并继续发布其它信息。"
+  ],
+  "suggestions": [
+    "删除“疑似酒后驾车”表述，或补充可核实的来源；若无法核实，应仅陈述关联报道中已有的明确事实。",
+    "将“冯德莱恩”改为“欧盟官员”或直接引用原文“More must be done...”，避免无依据的人物指认。",
+    "合并BBC与Guardian关于Todd Blanche撤回反武器化基金的重复条目，保留信息更完整的一条。",
+    "财经条目“阿斯利康与百时美施贵宝”的AI摘要混入了FirstFT新闻通讯中的其他新闻（伊朗谈判、油价、欧足联），建议聚焦于合并主题本身。",
+    "被屏蔽条目将在下一次抓取和 AI 精炼时重新评估，不进入本期公开输出。",
+    "乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。"
+  ]
+}

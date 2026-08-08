@@ -1,0 +1,112 @@
+{
+  "hero_headline": "OpenAI称Astra模型具备自主攻击能力，开发已减速",
+  "daily_overview": "搜索词「fc köln」：德国热搜显示，科隆拒绝了多特蒙德对球员马拉的第四次报价，并提高要价。后续报道称多特蒙德计划跟进，而马拉的转会或将在下周完成。；OpenAI称其仍在开发中的Astra模型达到「关键网络安全阈值」，可独立识别并对防护良好的真实系统发起网络攻击，因此公司放慢了该模型的开发进程。；乌克兰总统泽连斯基周六对塞尔维亚进行具有里程碑意义的首次访问。塞尔维亚领导人近年来一直在缩减与俄罗斯曾一度密切的关系，此访被视为俄罗斯影响力",
+  "tech_briefs": [
+    {
+      "title": "OpenAI称Astra模型具备自主攻击能力，开发已减速",
+      "url": "https://techcrunch.com/2026/08/07/openai-says-it-slowed-astra-model-development-over-security-concerns/",
+      "source": "TechCrunch",
+      "summary": "OpenAI称其仍在开发中的Astra模型达到「关键网络安全阈值」，可独立识别并对防护良好的真实系统发起网络攻击，因此公司放慢了该模型的开发进程。",
+      "importance": 8
+    },
+    {
+      "title": "安全研究员购买「勿回复」域名截获数百家公司机密",
+      "url": "https://www.wired.com/story/sensitive-info-goes-into-no-reply-emails-constantly-this-guy-sees-it-all/",
+      "source": "WIRED",
+      "summary": "两名安全研究员购买 noreply.net 和 deleteduser.com 等廉价域名，搭建邮件监听服务，发现数百家公司不断向这些地址发送邮件，企业机密信息尽收眼底。",
+      "importance": 7
+    },
+    {
+      "title": "如何关闭Gmail和谷歌文档中的Gemini AI功能",
+      "url": "https://www.wired.com/story/how-to-disable-the-gemini-ai-features-in-gmail-and-google-docs/",
+      "source": "WIRED",
+      "summary": "Gmail 和 Google Docs 中出现了新的 AI 工具栏与撰写提示，这些功能旨在协助用户写作。如果不想让 Gemini 帮忙写邮件或文档，可以按照文章介绍的方法将其关闭。",
+      "importance": 6
+    },
+    {
+      "title": "多模态模型新方法ChronoVision提升时间推理能力",
+      "url": "https://huggingface.co/papers/2608.05631",
+      "source": "HuggingFace Trending Papers",
+      "summary": "多模态大语言模型在被动感知任务上表现出色，但面对需要多步时间推理的复杂视觉任务时性能明显下降，主要原因在于基于语言的推理存在固有歧义。为此，ChronoVision通过潜在状态重建来增强模型的时间推理能力。",
+      "importance": 6
+    },
+    {
+      "title": "新基准GST-Bench检验视频模型全局空间感知",
+      "url": "https://huggingface.co/papers/2608.05747",
+      "source": "HuggingFace Trending Papers",
+      "summary": "空间智能是具身智能体的基础，但现有基准多聚焦于单视角或少数视角的局部空间感知，忽视了连续长时视频流中的全局空间意识。GST-Bench被提出，用于评估视觉语言模型能否从视频中建立全局空间意识。",
+      "importance": 6
+    }
+  ],
+  "finance_briefs": [
+    {
+      "title": "泽连斯基首访塞尔维亚，俄影响力渐弱",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-08/zelenskyy-makes-debut-trip-to-serbia-as-russian-influence-wanes",
+      "source": "Bloomberg Markets",
+      "summary": "乌克兰总统泽连斯基周六对塞尔维亚进行具有里程碑意义的首次访问。塞尔维亚领导人近年来一直在缩减与俄罗斯曾一度密切的关系，此访被视为俄罗斯影响力减弱的又一迹象。",
+      "importance": 7
+    },
+    {
+      "title": "乌克兰瞄准两座俄炼油厂 基辅遭袭",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-08/ukraine-drone-strike-sparks-fire-at-russia-s-ilsky-refinery",
+      "source": "Bloomberg Markets",
+      "summary": "乌克兰无人机残骸在俄罗斯克拉斯诺达尔地区的伊尔斯基炼油厂引发火灾，造成5人受伤。同时，俄乌双方夜间互相发动袭击，乌克兰方面瞄准两座俄罗斯炼油厂，基辅也遭到打击。",
+      "importance": 7
+    },
+    {
+      "title": "美国七月就业意外减少两万三千",
+      "url": "https://www.bbc.co.uk/news/articles/c20j5rle717o?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "美国七月就业人数意外减少两万三千，分析师此前预期会有所增加，数据远低于预期，显示夏季就业增长疲软态势仍在持续。",
+      "importance": 7
+    },
+    {
+      "title": "特朗普政府向德企支付12亿美元叫停美国风电项目",
+      "url": "https://www.bbc.co.uk/news/articles/c1e1vg0gjl5o?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "特朗普政府同意向德国RWE公司支付12亿美元，以叫停其在美国的风电项目。这是特朗普一系列取消风电项目交易中的最新一笔，风电长期遭到他嘲讽。",
+      "importance": 7
+    },
+    {
+      "title": "Meta因儿童安全裁决被罚5.67亿美元，累计9.42亿",
+      "url": "https://www.bbc.co.uk/news/articles/cd7lz3wr2rlo?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "社交媒体巨头Meta因涉及儿童安全的案件被罚5.67亿美元，加上此前已被责令支付的3.75亿美元，合计达9.42亿美元。这是针对该公司的最大规模儿童安全裁决。",
+      "importance": 7
+    }
+  ],
+  "politics_briefs": [
+    {
+      "title": "泰国校园枪击七死二十余伤 青少年行凶后自杀",
+      "url": "https://www.washingtonpost.com/world/2026/08/07/7-killed-more-than-30-injured-thailand-school-shooting/",
+      "source": "Washington Post",
+      "summary": "泰国校园枪击事件造成七人遇难、二十余人受伤。据当局消息，一名青少年先杀害其两名祖父母及五名教职员工，随后自杀身亡。",
+      "importance": 8
+    },
+    {
+      "title": "泰国校园枪击频发 官方承诺修订枪支法",
+      "url": "https://www.nytimes.com/2026/08/08/world/asia/thailand-mass-shootings-gun-laws.html",
+      "source": "NYT World",
+      "summary": "泰国一所高中于周五发生枪击，成为该国近年多起枪支暴力事件的最新一起。鉴于泰国已因大规模枪击频发而受到关注，官方再度承诺修订枪支管理法。",
+      "importance": 7
+    },
+    {
+      "title": "台风「海豚」袭击日本，正朝中国移动",
+      "url": "https://www.aljazeera.com/news/2026/8/8/typhoon-dolphin-hits-japan-heads-towards-china?traffic_source=rss",
+      "source": "Al Jazeera",
+      "summary": "台风「海豚」袭击日本，已致5名老年人受伤，均为非致命伤，其中3人因强风跌倒。气象路径显示，台风正朝中国方向移动，可能带来后续影响。",
+      "importance": 7
+    }
+  ],
+  "editor_note": "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+  "keywords": [
+    "国际",
+    "科技",
+    "社会",
+    "AI",
+    "财经",
+    "政治",
+    "环境",
+    "体育"
+  ]
+}

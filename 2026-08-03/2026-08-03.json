@@ -1,0 +1,112 @@
+{
+  "hero_headline": "阿里巴巴发布Qwen Max开放权重模型挑战美国AI优势",
+  "daily_overview": "搜索词「“地表最强男人”因雪崩遇难」：百度热搜「地表最强男人」因雪崩遇难指世界著名登山家尼尔马尔·普尔贾。他率领的10人国际登山队在巴基斯坦布洛阿特峰遭遇雪崩，队员全部遇难。8月2日，巴基斯坦阿尔卑斯俱乐部通报已回收其遗体。；中国科技巨头阿里巴巴发布了号称迄今最大、最强大的AI模型Qwen Max，采用开放权重模式，声称性能卓越，向美国在人工智能领域的主导地位发起新一轮挑战。；美国和日本采取罕见的联合行动支撑日元汇率，两国均表示未来不会",
+  "tech_briefs": [
+    {
+      "title": "阿里巴巴发布Qwen Max开放权重模型挑战美国AI优势",
+      "url": "https://www.theverge.com/ai-artificial-intelligence/974342/alibaba-qwen-max-open-weight-ai",
+      "source": "The Verge",
+      "summary": "中国科技巨头阿里巴巴发布了号称迄今最大、最强大的AI模型Qwen Max，采用开放权重模式，声称性能卓越，向美国在人工智能领域的主导地位发起新一轮挑战。",
+      "importance": 8
+    },
+    {
+      "title": "Cloudflare推出代理运行时，为每个Agent提供专属计算机",
+      "url": "https://blog.cloudflare.com/cloudflare-computer/",
+      "source": "Cloudflare Blog",
+      "summary": "Cloudflare发布@cloudflare/computer代理运行时，可在快速高效的isolate与完整Linux容器之间动态编排，为每个代理提供独立的计算环境，以支撑代理规模扩展。",
+      "importance": 7
+    },
+    {
+      "title": "Horizon3融资2.5亿美元，估值20亿美元应对AI威胁",
+      "url": "https://techcrunch.com/2026/08/03/horizon3-hits-2-billion-valuation-with-250m-series-e-as-ai-threats-escalate/",
+      "source": "TechCrunch",
+      "summary": "网络安全初创公司Horizon3完成2.5亿美元E轮融资，估值达20亿美元。企业希望用持续、AI驱动的安全验证取代年度渗透测试，以应对升级的AI威胁。",
+      "importance": 7
+    },
+    {
+      "title": "Cloudflare Workers新增入站TCP及gRPC支持",
+      "url": "https://blog.cloudflare.com/grpc-workers/",
+      "source": "Cloudflare Blog",
+      "summary": "Cloudflare Workers现通过Spectrum支持入站TCP连接，可将套接字直接转发至Durable Objects与容器，开发者能运行全双工gRPC应用，或使用自动gRPC至gRPC-web转换。",
+      "importance": 6
+    },
+    {
+      "title": "Cloudflare Workers RPC实现Python与JavaScript互通",
+      "url": "https://blog.cloudflare.com/python-workers-rpc/",
+      "source": "Cloudflare Blog",
+      "summary": "Cloudflare Workers RPC现支持Python与JavaScript互操作，不同语言编写的Worker可在运行时交换对象引用并调用其方法，无需定义API、模式或序列化代码。",
+      "importance": 6
+    }
+  ],
+  "finance_briefs": [
+    {
+      "title": "美日罕见联合行动支撑日元汇率",
+      "url": "https://www.bbc.co.uk/news/articles/cglj1pr0wjwo?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "美国和日本采取罕见的联合行动支撑日元汇率，两国均表示未来不会犹豫继续实施联合干预；此举显示双方对日元走弱的担忧。",
+      "importance": 8
+    },
+    {
+      "title": "亚马逊市值首破3万亿美元 跻身史上第五家",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-03/amazon-joins-elite-list-of-stocks-to-top-3-trillion-in-value",
+      "source": "Bloomberg Markets",
+      "summary": "据彭博消息，在美股市场中，亚马逊公司市值首次突破3万亿美元整数关口，由此成为有史以来第五家达到这一里程碑的上市公司。",
+      "importance": 7
+    },
+    {
+      "title": "阿斯利康与百时美施贵宝酝酿4000亿美元大合并",
+      "url": "https://www.ft.com/content/8cf8bbb2-e286-4824-8ec3-6404d2756bc3?syn-25a6b1a6=1",
+      "source": "Financial Times",
+      "summary": "据英国《金融时报》报道，阿斯利康与百时美施贵宝正讨论规模达4000亿美元的合并。此外，特朗普称今日开始与伊朗谈判，油价下跌，欧足联威胁对国际足联采取法律行动。",
+      "importance": 7
+    },
+    {
+      "title": "Strategy继续出售比特币和股票推进转型",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-03/strategy-sells-more-bitcoin-stock-as-it-pushes-on-with-overhaul",
+      "source": "Bloomberg Markets",
+      "summary": "迈克尔·塞勒旗下战略公司正推进转型，从持续买入比特币转向通过出售比特币和自身股票来充实储备、优化资本结构。",
+      "importance": 6
+    },
+    {
+      "title": "霍尔木兹海峡若持续关闭 智利比索债券将承压",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-03/chile-peso-bonds-face-pressure-if-strait-of-hormuz-stays-closed",
+      "source": "Bloomberg Markets",
+      "summary": "若霍尔木兹海峡持续关闭，智利比索债券融资成本可能在8月触及年内高位；中东冲突已进入第六个月，智利经济仍缺乏增长动能。",
+      "importance": 6
+    }
+  ],
+  "politics_briefs": [
+    {
+      "title": "伊朗否认特朗普所称周一将举行美伊会谈",
+      "url": "https://www.theguardian.com/world/live/2026/aug/03/us-iran-trump-strait-of-hormuz-talks-israel-gaza-lebanon-latest-news-updates",
+      "source": "The Guardian",
+      "summary": "伊朗否认特朗普所称会谈将在周一举行的说法，伊方发言人表示无计划接待或派遣代表团；德黑兰称正在与阿曼就航运路线谈判，而非与美国。报道还提及六艘沙特国旗超级油轮。",
+      "importance": 7
+    },
+    {
+      "title": "被拘留的缅甸领导人昂山素季五年来首见外宾",
+      "url": "https://www.aljazeera.com/news/2026/8/3/detained-myanmar-leader-suu-kyi-has-first-foreign-visitor-in-five-years?traffic_source=rss",
+      "source": "Al Jazeera",
+      "summary": "被拘留的缅甸领导人昂山素季会见了红十字国际委员会代表，这是她自2021年以来首次被确认与外国官员接触。",
+      "importance": 7
+    },
+    {
+      "title": "希腊消防直升机相撞坠毁致2人死亡",
+      "url": "https://www.nytimes.com/2026/08/03/world/europe/greece-fire-helicopter-crash-firefighters.html",
+      "source": "NYT World",
+      "summary": "两架消防直升机在希腊雅典西北部参与扑灭野火时相撞坠毁，造成2人死亡。过去一周希腊共发生200多起火灾，消防形势严峻。",
+      "importance": 7
+    }
+  ],
+  "editor_note": "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+  "keywords": [
+    "科技",
+    "国际",
+    "政治",
+    "财经",
+    "娱乐",
+    "云计算",
+    "人工智能",
+    "社会"
+  ]
+}

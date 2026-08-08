@@ -1,0 +1,112 @@
+{
+  "hero_headline": "特朗普宣布历史性加沙协议：哈马斯同意解除武装",
+  "daily_overview": "据 Reddit 用户分享，德克萨斯州一名副警长使用 Flock 车牌识别摄像头搜索 8.3 万条记录，试图定位一名进行堕胎的女性，引发对监控与堕胎隐私的争议。；WIRED获取的备忘录显示，明尼苏达州多家水厂遭遇数十次网络攻击，WaterISAC将攻击源头指向伊朗。；在日本当局再次干预汇市以支撑疲软日元后，日元兑美元飙升，创逾两年最大单日涨幅，市场关注日本央行政策决议。；特朗普宣布达成历史性加沙协议，和平委员会同意哈马斯解除武装，以色列",
+  "tech_briefs": [
+    {
+      "title": "泄露备忘录：明尼苏达水厂网络攻击与伊朗有关",
+      "url": "https://www.wired.com/story/a-leaked-memo-ties-cyberattacks-on-minnesota-water-utilities-to-iran/",
+      "source": "WIRED",
+      "summary": "WIRED获取的备忘录显示，明尼苏达州多家水厂遭遇数十次网络攻击，WaterISAC将攻击源头指向伊朗。",
+      "importance": 8
+    },
+    {
+      "title": "法官：特朗普政府仍无足够证据给Anthropic贴上供应链风险标签",
+      "url": "https://techcrunch.com/2026/07/30/judge-says-trump-admin-still-lacks-evidence-for-anthropic-supply-chain-risk-label/",
+      "source": "TechCrunch",
+      "summary": "联邦法官裁定，特朗普政府未能提供充分证据证明Anthropic存在供应链风险，质疑政府禁止其AI技术的决定。",
+      "importance": 8
+    },
+    {
+      "title": "研究揭示LLM根本缺陷：无法完全防御攻击",
+      "url": "https://www.technologyreview.com/2026/07/30/1140927/a-fundamental-flaw-leaves-llms-vulnerable-to-attack/",
+      "source": "MIT Tech Review AI",
+      "summary": "研究者在ICML上指出，由于LLM工作原理的根本缺陷，无法使其完全安全，LLM极易受到攻击。",
+      "importance": 8
+    },
+    {
+      "title": "GPT-5.6自我优化实锤，RSI焚诀来了",
+      "url": "https://www.qbitai.com/2026/07/463297.html",
+      "source": "量子位",
+      "summary": "OpenAI推出RSI（递归自我改进）方法，GPT-5.6实现自我优化，类似「左脚踩右脚」的迭代升级。",
+      "importance": 8
+    },
+    {
+      "title": "TurboVLA：32Hz 实时视觉-语言-行动模型",
+      "url": "https://huggingface.co/papers/2607.27205",
+      "source": "HuggingFace Trending Papers",
+      "summary": "TurboVLA 提出在 RTX 4090 上以 32Hz 实时运行视觉-语言-动作任务，显存占用低于1GB。通过优化 LLM 中心路径，提升机器人决策效率。",
+      "importance": 8
+    }
+  ],
+  "finance_briefs": [
+    {
+      "title": "日本再度干预汇市，日元飙升逾两年最大涨幅",
+      "url": "https://www.bloomberg.com/news/articles/2026-07-30/yen-surges-after-japan-intervened-in-market-again-ahead-of-boj",
+      "source": "Bloomberg Markets",
+      "summary": "在日本当局再次干预汇市以支撑疲软日元后，日元兑美元飙升，创逾两年最大单日涨幅，市场关注日本央行政策决议。",
+      "importance": 8
+    },
+    {
+      "title": "苹果警告Mac、iPhone、iPad未来供应受限",
+      "url": "https://www.bbc.co.uk/news/articles/c204nw64xwno?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "苹果股价大跌，因公司警告未来几个月销售增长放缓，Mac、iPhone、iPad可能面临供应限制。",
+      "importance": 7
+    },
+    {
+      "title": "蔚来汽车翻身成今年最热中国车商",
+      "url": "https://www.bloomberg.com/news/articles/2026-07-30/once-troubled-nio-turns-into-hottest-chinese-carmaker-this-year",
+      "source": "Bloomberg Markets",
+      "summary": "中国最大全电动SUV销量飙升，助力蔚来汽车财务状况改善，逆势上涨，摆脱此前困境，成为今年最热门的中国汽车制造商。",
+      "importance": 7
+    },
+    {
+      "title": "亚马逊今年AI基础设施支出增至2200亿美元",
+      "url": "https://www.ft.com/content/fddc42a9-4c57-4689-abde-75bbe79622e9?syn-25a6b1a6=1",
+      "source": "Financial Times",
+      "summary": "亚马逊将2026年AI基础设施支出预期从2000亿美元上调至2200亿美元，显示其在人工智能领域的投资力度持续加大。",
+      "importance": 7
+    },
+    {
+      "title": "7月31日石油市场动态：美伊战争升级推高油价",
+      "url": "https://www.bloomberg.com/news/articles/2026-07-30/latest-oil-market-news-and-analysis-for-july-31",
+      "source": "Bloomberg Markets",
+      "summary": "油价在波动周结束时企稳，但本月涨幅为三个月最大，因美伊战争升级加剧供应担忧。",
+      "importance": 7
+    }
+  ],
+  "politics_briefs": [
+    {
+      "title": "特朗普宣布历史性加沙协议：哈马斯同意解除武装",
+      "url": "https://timesofindia.indiatimes.com/world/us/monumental-step-toward-lasting-peace-donald-trump-announces-historic-gaza-deal-as-board-of-peace-agrees-on-hamas-disarmament/articleshow/132752458.cms",
+      "source": "Times of India",
+      "summary": "特朗普宣布达成历史性加沙协议，和平委员会同意哈马斯解除武装，以色列将撤军，分阶段建立新巴勒斯坦政权。",
+      "importance": 8
+    },
+    {
+      "title": "特朗普称哈马斯解除武装协议达成，以色列将撤军",
+      "url": "https://www.aljazeera.com/news/2026/7/30/trump-says-board-of-peace-reaches-agreement-on-disarmament-of-hamas-in-gaza?traffic_source=rss",
+      "source": "Al Jazeera",
+      "summary": "美国总统特朗普宣布，有关哈马斯在加沙解除武装的协议已达成，以色列随后将从加沙撤军，但细节尚未公布。",
+      "importance": 8
+    },
+    {
+      "title": "美中经贸高官线上会谈，或为习近平访美铺路",
+      "url": "http://www3.nhk.or.jp/news/html/20260731/k10015191501000.html",
+      "source": "NHK World",
+      "summary": "美中经济贸易高官30日举行线上会谈。中方对美方近期措施表示强烈关切，但双方同意扩大经贸合作。此举可能是在为9月习近平主席访美做铺垫。",
+      "importance": 8
+    }
+  ],
+  "editor_note": "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+  "keywords": [
+    "科技",
+    "AI",
+    "国际时政",
+    "国际",
+    "财经",
+    "社会",
+    "美国",
+    "政治"
+  ]
+}

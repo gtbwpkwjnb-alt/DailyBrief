@@ -1,0 +1,112 @@
+{
+  "hero_headline": "贝森特称日元汇率问题影响日本及其他货币",
+  "daily_overview": "搜索词「台风白海豚再次加强为超强台风」：国家海洋预报台8月4日15时发布海浪预判，今年第13号台风「白海豚」14时前后再次加强为超强台风，中心风力16级（52米/秒），刚经过高海温区有利强度维持，预计向偏西移动，强度还将增强。；Bending Spoons将以12.8亿美元收购Airtable。Airtable在2021年估值曾超110亿美元，今年早些时候二级市场交易估值约40亿美元。；美国财政部长贝森特表示，日元疲软已加剧日本通胀问题",
+  "tech_briefs": [
+    {
+      "title": "Bending Spoons拟以12.8亿美元收购Airtable公司",
+      "url": "https://techcrunch.com/2026/08/04/bending-spoons-to-buy-airtable-for-1-28b/",
+      "source": "TechCrunch",
+      "summary": "Bending Spoons将以12.8亿美元收购Airtable。Airtable在2021年估值曾超110亿美元，今年早些时候二级市场交易估值约40亿美元。",
+      "importance": 6
+    },
+    {
+      "title": "休陪产假期间，AI代理凭2741次对话创300万美元商机",
+      "url": "https://x.com/wayne_liang_/status/2084320195112485276",
+      "source": "X 推文 (AttentionVC)",
+      "summary": "博主休陪产假期间，AI代理克隆体运营销售一线：八周内每周拨打300多次潜在客户电话，新增132个付费客户、37个企业机会，管道价值约300万美元；它也编造过价格并发送内部邮件，代码已公开。",
+      "importance": 6
+    },
+    {
+      "title": "Buzz开源发布，HERMES AGENT接入配置指南",
+      "url": "https://x.com/IBuzovskyi/status/2084258777117663572",
+      "source": "X 推文 (AttentionVC)",
+      "summary": "推文分享 HERMES AGENT 接入 Buzz 的完整配置指南。Buzz 由 Jack Dorsey 的 Block 开源，采用 Apache-2.0 许可，2026年7月21日发布，当天推出 macOS、Windows、Linux 桌面版，主打将 Slack、GitHub 和 AI 代理整合在同一窗口。",
+      "importance": 6
+    },
+    {
+      "title": "腾讯云TencentDB Agent Memory：团队级AI记忆中枢",
+      "url": "https://github.com/TencentCloud/TencentDB-Agent-Memory",
+      "source": "GitHub Trending",
+      "summary": "腾讯云推出的面向AI Agent团队级记忆中枢，将对话、文档和代码转化为四类可复用记忆资产：对话记忆、技能、LLM维基和代码图谱，并支持跨Agent与框架治理共享。",
+      "importance": 6
+    },
+    {
+      "title": "Uber开源ADR：守护企业AI代理安全",
+      "url": "https://github.com/uber/ADR",
+      "source": "GitHub Trending",
+      "summary": "优步开源的ADR项目，通过可观测性、安全基准测试和威胁检测来保护企业级AI代理，并已在优步内部部署应用。",
+      "importance": 6
+    }
+  ],
+  "finance_briefs": [
+    {
+      "title": "贝森特称日元汇率问题影响日本及其他货币",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-04/bessent-says-yen-level-problematic-for-japan-other-currencies",
+      "source": "Bloomberg Markets",
+      "summary": "美国财政部长贝森特表示，日元疲软已加剧日本通胀问题，并推升亚洲货币更广泛贬值的风险。他重申美国支持稳定相关局势的努力。",
+      "importance": 7
+    },
+    {
+      "title": "英国Segro接受美国普洛斯140亿英镑收购要约",
+      "url": "https://www.ft.com/content/1d8ac0ff-8ff0-44fd-bd92-5fd18983f31e?syn-25a6b1a6=1",
+      "source": "Financial Times",
+      "summary": "美国竞争对手普洛斯向英国上市公司Segro提出140亿英镑收购要约，Segro已接受。这是伦敦上市公司被收购潮中的最新交易，此前施罗德和天祥集团已被收购。",
+      "importance": 7
+    },
+    {
+      "title": "美联储保尔森：对利率路径保持开放态度",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-04/fed-s-paulson-keeping-an-open-mind-on-interest-rates-video",
+      "source": "Bloomberg Markets",
+      "summary": "费城联邦储备银行行长安娜·保尔森表示，她将对利率路径保持开放心态，并称当前关注潜在通胀趋势。",
+      "importance": 6
+    },
+    {
+      "title": "特朗普称伊朗只剩最后机会 SpaceX与AMD财报在即",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-04/bloomberg-brief-08-04-2026-video",
+      "source": "Bloomberg Markets",
+      "summary": "美国股指期货在科技股领涨下接近历史高位。特朗普称其最新谈判提议是伊朗与美国达成协议的最后机会。SpaceX将公布上市后首份财报，AMD财报亦在即。",
+      "importance": 6
+    },
+    {
+      "title": "特朗普媒体出售社交帖快速访问权引争议",
+      "url": "https://www.bbc.co.uk/news/articles/c4gdkl9zn8wo?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "特朗普媒体科技集团推出付费服务，向华尔街公司提供其社交平台Truth Social上最具影响力账号的快速访问权限，此举引发争议。",
+      "importance": 6
+    }
+  ],
+  "politics_briefs": [
+    {
+      "title": "英国塑料废物殖民主义污染土耳其农业腹地",
+      "url": "https://www.theguardian.com/environment/2026/aug/04/uk-plastic-waste-colonialism-recycling-exports-contaminating-water-crops-turkey",
+      "source": "The Guardian",
+      "summary": "《卫报》调查发现，作为英国废塑料主要出口目的地的土耳其，其农业灌溉运河中检测到高水平微塑料污染。当地农民表示「没人在乎」，他们正承受英国塑料垃圾问题的负担。",
+      "importance": 7
+    },
+    {
+      "title": "英吉利海峡船只起火，超过150名移民获救",
+      "url": "https://www.bbc.co.uk/news/articles/c4gkpeppjyqo?at_medium=RSS&at_campaign=rss",
+      "source": "BBC World",
+      "summary": "法国当局表示，一艘试图横渡英吉利海峡前往英国的船只发动机起火，超过150名移民在海上获救。此次救援行动的具体细节尚未进一步披露。",
+      "importance": 6
+    },
+    {
+      "title": "埃塞俄比亚修道院祈祷时遭遇致命山体滑坡",
+      "url": "https://www.bbc.co.uk/news/articles/c2lqpx1qd8lo?at_medium=RSS&at_campaign=rss",
+      "source": "BBC World",
+      "summary": "埃塞俄比亚一座山区修道院在通宵祈祷仪式期间发生致命山体滑坡，岩石和泥土砸向正在祈祷的人们，当局已确认事件造成人员死亡。",
+      "importance": 6
+    }
+  ],
+  "editor_note": "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+  "keywords": [
+    "科技",
+    "国际",
+    "财经",
+    "人工智能",
+    "AI",
+    "政治",
+    "企业财报",
+    "智能体"
+  ]
+}

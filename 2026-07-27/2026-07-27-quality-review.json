@@ -1,0 +1,16 @@
+{
+  "date": "2026-07-27",
+  "reviewedAt": "2026-07-27T13:27:56.491Z",
+  "publicationState": "eligible",
+  "reviewState": "passed",
+  "failureCodes": [],
+  "issues": [
+    "热搜趋势屏蔽 10 条摘要缺失、低信息或疑似乱码内容，已跳过并继续发布其它信息。"
+  ],
+  "suggestions": [
+    "国际时政板块来源均为英国媒体（BBC、The Guardian），建议增加其他地区媒体以增强多样性。",
+    "热搜中Charli XCX照片收藏条目（英国）与每日时政关联度较弱，可考虑替换为更具新闻价值的条目。",
+    "财经板块中“North Sea pioneer Sir Ian Wood dies”条目未提供原文死亡证据，建议尽快核实正文确认后再发布。",
+    "乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。"
+  ]
+}

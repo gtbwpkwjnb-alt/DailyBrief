@@ -1,0 +1,53 @@
+{
+  "date": "2026-08-07",
+  "reviewedAt": "2026-08-07T01:37:30.731Z",
+  "publicationState": "eligible",
+  "reviewState": "passed",
+  "failureCodes": [],
+  "blockingScope": "none",
+  "blockingItems": [],
+  "runStats": {
+    "fetchedSources": 60,
+    "successfulSources": 58,
+    "sourceSuccessRate": 0.9666666666666667,
+    "fetchedArticles": 1249,
+    "dedupedArticles": 1212,
+    "publicSelectionEligible": 695,
+    "publicSelectionLowInformationFiltered": 36,
+    "publicSelectionQualityFiltered": 2,
+    "publicSelectionEventMerged": 5,
+    "publicSelectionAdaptiveTarget": 61,
+    "publicSelectionExpansionArticles": 9,
+    "freshnessWindowHours": 72,
+    "freshArticles": 819,
+    "staleArticlesRejected": 363,
+    "undatedArticlesRejected": 30,
+    "futureArticlesRejected": 0,
+    "liveSnapshotArticles": 13,
+    "newestPublishedAt": "2026-08-07T01:29:24.720Z",
+    "generatedAt": "2026-08-07T01:37:30.721Z",
+    "mode": "fresh",
+    "enrichmentVersion": 4,
+    "sourceFallbackArticles": 0,
+    "enrichmentStopReason": "budget",
+    "enrichmentCircuitOpen": true,
+    "suppressedArticles": 13,
+    "displayedArticles": 38,
+    "personalizedArticles": 0,
+    "aiEnrichedArticles": 38,
+    "aiTargetArticles": 51,
+    "sourceFallbackCandidateArticles": 0,
+    "sourceFallbackSecondaryFilteredArticles": 0,
+    "finalPublishedArticles": 38
+  },
+  "issues": [
+    "热搜趋势屏蔽 2 条高风险、低信息或疑似乱码内容，已跳过并继续发布其它信息。",
+    "国际时政屏蔽 11 条高风险、低信息或疑似乱码内容，已跳过并继续发布其它信息。"
+  ],
+  "suggestions": [
+    "技术动态四个条目均来自GitHub Trending，建议补充其他技术新闻源以增强来源多样性。",
+    "财经要点中“安瓦尔之女”条目实际涉及马来西亚，但“涉及国家”标为“未明确”，建议完善标注。",
+    "国际时政中“伊朗称与阿曼重开霍尔木兹海峡协议接近敲定”的AI摘要提及“加沙重建和平委员会”，原文摘录未明确对应，建议校对或弱化该表述。",
+    "乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。"
+  ]
+}

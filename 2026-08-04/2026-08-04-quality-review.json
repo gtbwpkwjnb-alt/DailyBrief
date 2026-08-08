@@ -1,0 +1,75 @@
+{
+  "date": "2026-08-04",
+  "reviewedAt": "2026-08-04T12:31:45.156Z",
+  "publicationState": "eligible",
+  "reviewState": "passed",
+  "failureCodes": [],
+  "blockingScope": "items",
+  "blockingItems": [
+    {
+      "url": "https://www.bbc.co.uk/news/articles/c5y3ppmmev1o?at_medium=RSS&at_campaign=rss",
+      "category": "politics",
+      "reason": "该条目原始标题与原文摘录不匹配，AI摘要未提供有效摘要，且展示标题含“待核验”，不可发布。"
+    }
+  ],
+  "recovery": {
+    "suppressedCount": 1,
+    "suppressedItems": [
+      {
+        "url": "https://www.bbc.co.uk/news/articles/c5y3ppmmev1o?at_medium=RSS&at_campaign=rss",
+        "category": "politics",
+        "reason": "该条目原始标题与原文摘录不匹配，AI摘要未提供有效摘要，且展示标题含“待核验”，不可发布。"
+      }
+    ],
+    "originalFailureCodes": [
+      "AI_REVIEW_BLOCKED"
+    ]
+  },
+  "runStats": {
+    "fetchedSources": 60,
+    "successfulSources": 59,
+    "sourceSuccessRate": 0.9833333333333333,
+    "fetchedArticles": 1290,
+    "dedupedArticles": 1246,
+    "publicSelectionEligible": 641,
+    "publicSelectionLowInformationFiltered": 34,
+    "publicSelectionQualityFiltered": 2,
+    "publicSelectionEventMerged": 2,
+    "publicSelectionAdaptiveTarget": 61,
+    "publicSelectionExpansionArticles": 8,
+    "freshnessWindowHours": 72,
+    "freshArticles": 778,
+    "staleArticlesRejected": 438,
+    "undatedArticlesRejected": 30,
+    "futureArticlesRejected": 0,
+    "liveSnapshotArticles": 18,
+    "newestPublishedAt": "2026-08-04T12:24:05.456Z",
+    "generatedAt": "2026-08-04T12:31:45.147Z",
+    "mode": "fresh",
+    "enrichmentVersion": 4,
+    "sourceFallbackArticles": 0,
+    "enrichmentStopReason": "budget",
+    "enrichmentCircuitOpen": true,
+    "suppressedArticles": 15,
+    "displayedArticles": 35,
+    "personalizedArticles": 0,
+    "aiEnrichedArticles": 35,
+    "aiTargetArticles": 50,
+    "sourceFallbackCandidateArticles": 0,
+    "sourceFallbackSecondaryFilteredArticles": 0,
+    "finalPublishedArticles": 35
+  },
+  "issues": [
+    "国际时政条目《待核验：Arson arrest made over largest of Washington state's wildfires》的原文摘录与原始标题不匹配，AI摘要未提供实际事件摘要，仅说明证据不足，且展示标题含有“待核验”，不符合发布标准。",
+    "质量审核定位并屏蔽 1 条存在发布级事实风险的内容，其余信息继续发布。",
+    "热搜趋势屏蔽 2 条高风险、低信息或疑似乱码内容，已跳过并继续发布其它信息。",
+    "国际时政屏蔽 12 条高风险、低信息或疑似乱码内容，已跳过并继续发布其它信息。"
+  ],
+  "suggestions": [
+    "请补充该条目的真实原文摘录或有效AI摘要，或在未核验前暂时下线该条目。",
+    "热搜趋势板块中Le Monde条目的媒体所属国标注为“未知”，建议修正为法国以增强来源透明度。",
+    "各栏目来源多样性整体较好，GitHub Trending集中技术条目属正常现象，可继续维持。",
+    "被屏蔽条目将在下一次抓取和 AI 精炼时重新评估，不进入本期公开输出。",
+    "乱码或未翻译摘要已按单条屏蔽；下一期继续观察同一来源的输出质量。"
+  ]
+}

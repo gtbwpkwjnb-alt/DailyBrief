@@ -1,0 +1,90 @@
+{
+  "hero_headline": "AirLLM：4GB显卡跑70B大模型推理",
+  "daily_overview": "信息有限：仅展示来源原文摘录。Mine is definitely snippet tool. So useful submitted by /u/DemonsAreVirgins to r/pcmasterrace [link] [留言]；AirLLM 是一个推理优化项目，目标是让70B参数的大语言模型仅需单个4GB显存GPU即可完成推理。它显著降低了大模型部署的硬件门槛，为资源受限环境下运行大规模AI模型提供了可行方案。；信息有限：",
+  "tech_briefs": [
+    {
+      "title": "AirLLM：4GB显卡跑70B大模型推理",
+      "url": "https://github.com/lyogavin/airllm",
+      "source": "GitHub Trending",
+      "summary": "AirLLM 是一个推理优化项目，目标是让70B参数的大语言模型仅需单个4GB显存GPU即可完成推理。它显著降低了大模型部署的硬件门槛，为资源受限环境下运行大规模AI模型提供了可行方案。",
+      "importance": 6
+    },
+    {
+      "title": "微软开源AI入门课程：12周24节课",
+      "url": "https://github.com/microsoft/AI-For-Beginners",
+      "source": "GitHub Trending",
+      "summary": "微软推出开源项目「AI for Beginners」，提供为期12周、共24课时的AI入门课程，面向零基础学习者，内容涵盖人工智能核心概念与实际应用，旨在让所有人都能轻松上手学习AI。",
+      "importance": 5
+    },
+    {
+      "title": "build-your-own-x：从零重建技术学编程",
+      "url": "https://github.com/codecrafters-io/build-your-own-x",
+      "source": "GitHub Trending",
+      "summary": "build-your-own-x 是一个编程学习资源合集，鼓励开发者从零开始重建自己喜爱的技术，通过动手实践理解其内部原理，从而掌握编程技能。",
+      "importance": 5
+    },
+    {
+      "title": "Kaneo：简洁开源项目管理工具",
+      "url": "https://github.com/usekaneo/kaneo",
+      "source": "GitHub Trending",
+      "summary": "Kaneo是一款开源项目管理工具，强调简洁无冗余，宣称只包含你需要的一切。它致力于让项目管理适配用户工作流，而非让用户迁就工具，适合追求轻量高效团队的日常使用。",
+      "importance": 4
+    },
+    {
+      "title": "Invidious：YouTube替代前端项目",
+      "url": "https://github.com/iv-org/invidious",
+      "source": "GitHub Trending",
+      "summary": "Invidious 是一个 YouTube 的替代前端，为用户提供另一种访问和观看 YouTube 视频的界面方式，属于开源项目，旨在让用户以不同方式使用并浏览平台上的视频内容。",
+      "importance": 4
+    }
+  ],
+  "finance_briefs": [
+    {
+      "title": "Hungary braced for power cuts amid extreme drought",
+      "url": "https://www.ft.com/content/a4539dc2-dcb0-4b57-9a78-c32cb1f9eda1?syn-25a6b1a6=1",
+      "source": "Financial Times",
+      "summary": "信息有限：仅展示来源原文摘录。Record-low water levels on Danube force country’s first shutdown of nuclear power plant",
+      "importance": 1
+    },
+    {
+      "title": "Why Think Tanks are a Billion Dollar Business",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-02/why-think-tanks-are-a-billion-dollar-business-video",
+      "source": "Bloomberg Markets",
+      "summary": "信息有限：仅展示来源原文摘录。Think tanks bring together experts and shape debates in Washington, but how do you measure the value of an idea? From the Aspen Institute to the Heritage Foundation, this episode explores the business of ideas, the billions of dollars behind America's leading ",
+      "importance": 1
+    },
+    {
+      "title": "Bond Traders Flying Blind on Fed See Risk Yields Spiral Higher",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-02/bond-traders-flying-blind-on-fed-see-risk-yields-spiral-higher",
+      "source": "Bloomberg Markets",
+      "summary": "信息有限：仅展示来源原文摘录。Bond investors including Brandywine Global Investment Management and Wellington Management say the risk of a deeper Treasury rout is rising as Federal Reserve Chairman Kevin Warsh keeps investors in the dark about how officials will respond to the evolving eco",
+      "importance": 1
+    },
+    {
+      "title": "Nides Says Iran War Needs Negotiations",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-02/nides-says-iran-war-needs-negotiations-video",
+      "source": "Bloomberg Markets",
+      "summary": "信息有限：仅展示来源原文摘录。Former US Ambassador to Israel Tom Nides says there is no lasting military solution to the conflict with Iran, arguing that renewed negotiations involving regional allies offer the only realistic path to reopening the Strait of Hormuz and addressing Tehran's n",
+      "importance": 1
+    },
+    {
+      "title": "By The Way: Headlines You May Have Missed the Week of 8/02",
+      "url": "https://www.bloomberg.com/news/videos/2026-08-02/by-the-way-headlines-you-may-have-missed-video",
+      "source": "Bloomberg Markets",
+      "summary": "信息有限：仅展示来源原文摘录。Younger Chinese professionals moving away from the traditional baijiu drinking culture, premium bottled water gaining traction with wellness-focused consumers, and historic government buildings across Europe being converted into luxury hotels. Bloomberg News' ",
+      "importance": 1
+    }
+  ],
+  "politics_briefs": [],
+  "editor_note": "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+  "keywords": [
+    "信息有限",
+    "科技",
+    "AI",
+    "开源",
+    "教育",
+    "前端",
+    "大模型",
+    "安全"
+  ]
+}

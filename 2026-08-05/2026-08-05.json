@@ -1,0 +1,112 @@
+{
+  "hero_headline": "鲁比奥：美伊有望很快达成霍尔木兹协议",
+  "daily_overview": "搜索词「兰蔻在华首家旗舰店已被搬空」：兰蔻在华首家旗舰店位于北京王府井apm商场，曾号称是全球第二家、中国首家且最大的高档美妆门店。8月4日记者发现其大门紧闭、已被搬空，开业不到6年即关闭。报道未说明具体原因，消息引发关注。；在SpaceX首次财报电话会议上，CEO埃隆·马斯克多次放大CFO布雷特·约翰森和格温·肖特韦尔作出的承诺，令本就宏大的业绩目标显得更为激进。；受霍尔木兹海峡可能重新开放的预期影响，国际油价下跌。美国国务卿鲁比奥与",
+  "tech_briefs": [
+    {
+      "title": "马斯克在SpaceX首场财报电话会上屡次加码高管承诺",
+      "url": "https://techcrunch.com/2026/08/04/elon-musk-repeatedly-one-upped-his-execs-on-spacexs-first-earnings-call/",
+      "source": "TechCrunch",
+      "summary": "在SpaceX首次财报电话会议上，CEO埃隆·马斯克多次放大CFO布雷特·约翰森和格温·肖特韦尔作出的承诺，令本就宏大的业绩目标显得更为激进。",
+      "importance": 6
+    },
+    {
+      "title": "Lucid新CEO公布扭亏计划 聚焦中型电动车与无人驾驶",
+      "url": "https://techcrunch.com/2026/08/04/lucids-turnaround-plan-hinges-on-1-4b-in-cash-savings-robotaxis/",
+      "source": "TechCrunch",
+      "summary": "Lucid新任CEO西尔维奥·纳波利提出扭亏计划，列出四大优先事项：成功推出中型电动汽车、完成沙特阿拉伯工厂、削减开支及发展无人驾驶出租车。该计划依赖约14亿美元现金节省。",
+      "importance": 6
+    },
+    {
+      "title": "白宫对AI网络安全框架内容秘而不宣",
+      "url": "https://www.wired.com/story/the-white-house-is-keeping-its-ai-cybersecurity-framework-secret/",
+      "source": "WIRED",
+      "summary": "美国特朗普政府周二将AI网络安全框架细节分享给OpenAI、Anthropic等AI实验室，但未向公众公开。目前该框架仍处于保密状态，外界无法获知具体内容。",
+      "importance": 6
+    },
+    {
+      "title": "AI代理代班八周谈成三百万美元商机",
+      "url": "https://x.com/wayne_liang_/status/2084320195112485276",
+      "source": "X 推文 (AttentionVC)",
+      "summary": "博主休育儿假八周，由AI克隆代理负责销售一线：每周300多个潜在客户通话，带来132个付费客户和约300万美元的37个企业商机；但代理也会自行编造价格。",
+      "importance": 6
+    },
+    {
+      "title": "Hermes Agent接入Buzz完整配置指南",
+      "url": "https://x.com/IBuzovskyi/status/2084258777117663572",
+      "source": "X 推文 (AttentionVC)",
+      "summary": "Buzz于2026年7月21日发布，由Block公司以Apache-2.0协议开源，同日推出macOS、Windows和Linux桌面版，定位是把Slack、GitHub和AI代理整合到一个窗口。本文提供Hermes Agent接入的完整设置指南。",
+      "importance": 6
+    }
+  ],
+  "finance_briefs": [
+    {
+      "title": "霍尔木兹海峡有望重开 国际油价应声下跌",
+      "url": "https://www.bbc.co.uk/news/articles/cpw9v0gnzxwo?at_medium=RSS&at_campaign=rss",
+      "source": "BBC Business",
+      "summary": "受霍尔木兹海峡可能重新开放的预期影响，国际油价下跌。美国国务卿鲁比奥与财政部长贝森特均表示，相关谈判取得进展，航运可望恢复。",
+      "importance": 7
+    },
+    {
+      "title": "亚洲股市有望走高 美伊临时协议预期缓解市场担忧",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-04/stock-market-today-dow-s-p-live-updates",
+      "source": "Bloomberg Markets",
+      "summary": "亚洲股市预计将追随华尔街走高，市场对美伊可能达成临时协议的乐观情绪缓解了能源供应担忧，并推动美股刷新纪录。",
+      "importance": 6
+    },
+    {
+      "title": "Booking Holdings维持全年业绩展望 旅游需求保持韧性",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-04/booking-holdings-keeps-full-year-outlook-on-resilient-travel",
+      "source": "Bloomberg Markets",
+      "summary": "Booking Holdings公司维持全年总预订量和收入展望，得益于旅游需求保持韧性。尽管中东冲突拖累航班价格和运力，公司仍看好整体业务表现。",
+      "importance": 6
+    },
+    {
+      "title": "8月5日石油市场最新消息与分析",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-04/latest-oil-market-news-and-analysis-for-aug-5",
+      "source": "Bloomberg Markets",
+      "summary": "8月5日石油市场最新动态显示，原油价格连续第二日下跌，市场对达成重新开放霍尔木兹海峡的协议抱有乐观预期。",
+      "importance": 6
+    },
+    {
+      "title": "AI抛售重创对冲基金 鲸石资本7月跌21.7%",
+      "url": "https://www.bloomberg.com/news/articles/2026-08-04/whale-rock-sank-22-as-ai-selloff-crippled-hedge-fund-returns",
+      "source": "Bloomberg Markets",
+      "summary": "鲸石资本管理公司旗下旗舰对冲基金在7月人工智能抛售潮中下跌21.7%，抹去今年约一半涨幅，成为上月最大输家之一。",
+      "importance": 6
+    }
+  ],
+  "politics_briefs": [
+    {
+      "title": "鲁比奥：美伊有望很快达成霍尔木兹协议",
+      "url": "https://www.theguardian.com/world/live/2026/aug/04/middle-east-crisis-qatar-iran-us-israel-war-donald-trump-strait-hormuz-gaza-latest-news-updates",
+      "source": "The Guardian",
+      "summary": "美国官员鲁比奥表示希望很快与伊朗达成霍尔木兹海峡协议。美方与卡塔尔称伊朗停火及重开海峡取得进展，伊朗与阿曼也在相关协议上取得突破，或有助于结束中东战争。",
+      "importance": 7
+    },
+    {
+      "title": "特朗普威胁不断，世界却不再退缩",
+      "url": "https://www.washingtonpost.com/world/2026/08/04/trump-keeps-making-threats-washington-world-have-stopped-flinching/",
+      "source": "Washington Post",
+      "summary": "报道指出特朗普的强硬言论已难再让各国领导人紧张，因他受到法院约束、国会抵制，并在伊朗问题上被拖延。",
+      "importance": 7
+    },
+    {
+      "title": "同行评审称英国军情六处为欧洲最强情报机构",
+      "url": "https://www.theguardian.com/uk-news/2026/aug/04/mi6-top-european-foreign-intelligence-service-peer-review",
+      "source": "The Guardian",
+      "summary": "一份同行评审将英国秘密情报局（军情六处）评为欧洲最强大的对外情报机构，超越法国和荷兰。评审称其有「喜欢肮脏伎俩」的特点，但也承认其非凡能力。",
+      "importance": 6
+    }
+  ],
+  "editor_note": "本期概览由网页端实际展示的 AI 精炼条目确定性生成。",
+  "keywords": [
+    "科技",
+    "国际",
+    "财经",
+    "AI",
+    "经济",
+    "人工智能",
+    "政治",
+    "社会"
+  ]
+}
